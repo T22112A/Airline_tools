@@ -108,7 +108,7 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
     df_out = pd.DataFrame(records)
     return df_out[export_cols] if export_cols else df_out
 
-def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols):
+def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircraft_table):
     import numpy as np
 
     # Loại bỏ các dòng tổng cuối file
@@ -145,6 +145,26 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols):
         y_values.append(y)
     df2["C"] = c_values
     df2["Y"] = y_values
+
+    # So sánh RegNr., C, Y với bảng Aircraft
+    aircraft_df = pd.DataFrame(aircraft_table["rows"], columns=aircraft_table["columns"])
+    aircraft_df["C"] = aircraft_df["C"].astype(int)
+    aircraft_df["Y"] = aircraft_df["Y"].astype(int)
+    df2["ACV"] = ""
+    df2["SaleableCfg"] = ""
+
+    for idx, row in df2.iterrows():
+        reg = str(row["RegNr."]).strip().upper()
+        c = int(row["C"])
+        y = int(row["Y"])
+        matched = aircraft_df[
+            (aircraft_df["RegNr."].astype(str).str.upper() == reg) &
+            (aircraft_df["C"] == c) &
+            (aircraft_df["Y"] == y)
+        ]
+        if not matched.empty:
+            df2.at[idx, "ACV"] = matched.iloc[0]["ACV"]
+            df2.at[idx, "SaleableCfg"] = matched.iloc[0]["SaleableCfg"]
 
     df_out = df2[export_cols].copy()
     return df_out

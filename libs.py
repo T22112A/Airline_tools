@@ -4,27 +4,22 @@ import pandas as pd
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 from sqlalchemy import inspect
 
-def on_import_clicked(self, button_name):
-    button_config = next((cfg for cfg in self.config.button_configs if cfg["name"] == button_name), None)
-
-    if not button_config or "table_name" not in button_config:
-        QMessageBox.critical(self, "Lỗi", "Không tìm thấy cấu hình cho nút này.")
-        return
-
-    self.num_cols = button_config.get("num_cols", self.num_cols)
-    self.required_cols = button_config.get("required_cols", self.required_cols)
-    self.start_row = button_config.get("start_row", self.start_row)
-    self.import_all_sheets = button_config.get("import_all_sheets", self.import_all_sheets)
-    validate_func = button_config.get("validate_func", lambda df: df)
+def on_import_clicked(window, cfg):
+    start_row = cfg.get("start_row", window.config.default_start_row)
+    num_cols = cfg.get("num_cols", window.config.default_num_cols)
+    required_cols = cfg.get("required_cols", window.config.default_required_cols)
+    import_all_sheets = cfg.get("import_all_sheets", window.config.default_import_all_sheets)
+    validate_and_format_func = cfg["validate_func"]
+    table_name = cfg.get("table_name")
 
     import_file_general(
-        self,
-        self.num_cols,
-        self.required_cols,
-        self.start_row,
-        self.import_all_sheets,
-        validate_func,
-        table_name=button_config["table_name"]
+        window,
+        num_cols,
+        required_cols,
+        start_row,
+        import_all_sheets,
+        validate_and_format_func,
+        table_name
     )
 
 

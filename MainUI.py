@@ -24,11 +24,6 @@ class MyWindow(QWidget):
             if "table_name" in cfg and cfg["table_name"] is not None
         }
 
-        self.num_cols = self.config.default_num_cols
-        self.required_cols = self.config.default_required_cols
-        self.start_row = self.config.default_start_row
-        self.import_all_sheets = self.config.default_import_all_sheets
-
         self.db_engine = create_engine('sqlite:///imported_data.db')
 
         self.setup_ui()
@@ -54,7 +49,9 @@ class MyWindow(QWidget):
                 if name == "Thoát":
                     button.clicked.connect(QApplication.quit)
                 elif name in ["1A Periods", "1A Market Report", "AIMS Data"]:
-                    button.clicked.connect(lambda _, n=name: on_import_clicked(self, n))
+                    # Lấy đúng config của nút
+                    cfg = self.button_configs[index]
+                    button.clicked.connect(lambda _, c=cfg: on_import_clicked(self, c))
                 elif name == "Đồng bộ":
                     button.clicked.connect(lambda: export_to_excel_dialog(self))
 
@@ -83,6 +80,7 @@ class MyWindow(QWidget):
 
         main_layout.addLayout(row_layout)
         self.setLayout(main_layout)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -4,8 +4,33 @@ from functions import (
     validate_and_format_for_AIMS
 )
 
+data_tables = {
+    "Aircraft": {
+        "columns": ["RegNr.", "ACV", "SaleableCfg", "C", "Z", "Y", "EquipmentType"],
+        "rows": [
+            ["PK-BBK", "BBK", "BBK", 0, 0, 215, 737],
+            ["JU-1410", "JU1", "JUA", 0, 0, 180, 320],
+            ["VN-A227", "227", "27A", 8, 0, 176, 321],
+            ["VN-A585", "585", "85A", 8, 0, 184, 321],
+            ["VN-A594", "585", "85A", 8, 0, 184, 321],
+            ["VN-A596", "596", "96A", 8, 0, 168, 320],
+            ["VN-A597", "585", "85A", 8, 0, 184, 321]
+        ]
+    }
+}
+
 class Config:
     def __init__(self):
+        self.data_tables = data_tables
+        self.default_num_cols = 10
+        self.default_required_cols = []
+        self.default_start_row = 2
+        self.default_import_all_sheets = True
+        self.background_images = [
+            "bg_1.jpg", "bg_2.jpg", "bg_3.jpg", "bg_4.jpg", "bg_5.jpg",
+            "bg_6.jpg", "bg_7.jpg", "bg_8.jpg", "bg_9.jpg", "bg_10.jpg"
+        ]
+
         self.button_configs = [
             {
                 "name": "1A Periods",
@@ -29,7 +54,8 @@ class Config:
                 "export_cols": [
                     'Type', 'OL', 'FlightNbr', 'OperationDate', 'Frequency', 'I/D',
                     'DEP', 'ARR', 'Svc', 'ACV', 'SaleableCfg', 'Codeshare'
-                ]
+                ],
+                "start_row": 1
             },
             {
                 "name": "1A Market Report",
@@ -53,7 +79,8 @@ class Config:
                 "export_cols": [
                     "OperationDate", "OL", "FlightNbr", "Frequency", "STD",
                     "DEP", "ARR", "C", "Y", "ACtype"
-                ]
+                ],
+                "start_row": 1
             },
             {
                 "name": "AIMS Data",
@@ -70,13 +97,14 @@ class Config:
                     "DEP": "DEP",
                     "ARR": "ARR",
                     "STD": "STD",
-                    # BLOCK, FLThr, AC CONFIG giữ nguyên tên
                 },
                 "export_cols": [
                     "OperationDate", "FlightNbr", "Type", "RegNr.", "ACtype",
-                    "DEP", "ARR", "STD", "C", "Y"
-                ]
+                    "DEP", "ARR", "STD", "C", "Y", "ACV", "SaleableCfg"
+                ],
+                "start_row": 3  # Dòng 3 là header thực tế của file AIMS!
             },
+            # Các nút placeholder cho đủ 10 nút
             {"name": "Cài đặt", "table_name": "CaiDat_Data"},
             {"name": "Giúp đỡ", "table_name": "Help_Data"},
             {"name": "In", "table_name": "In_Data"},
@@ -86,7 +114,7 @@ class Config:
             {"name": "Thoát", "table_name": None}
         ]
 
-        # Thiết lập validate_func cho từng loại
+        # Gán validate_func cho từng loại
         for cfg in self.button_configs:
             if cfg["name"] == "1A Periods":
                 cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"]: \
@@ -95,17 +123,10 @@ class Config:
                 cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"]: \
                     validate_and_format_for_1A_market_report(df, rc, cm, ec)
             elif cfg["name"] == "AIMS Data":
-                cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"]: \
-                    validate_and_format_for_AIMS(df, rc, cm, ec)
+                cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"], dt=self.data_tables["Aircraft"]: \
+                    validate_and_format_for_AIMS(df, rc, cm, ec, dt)
             else:
                 cfg["validate_func"] = lambda df: df
 
-        # Các thuộc tính mặc định, hình nền...
-        self.background_images = [
-            "bg_1.jpg", "bg_2.jpg", "bg_3.jpg", "bg_4.jpg", "bg_5.jpg",
-            "bg_6.jpg", "bg_7.jpg", "bg_8.jpg", "bg_9.jpg", "bg_10.jpg"
-        ]
-        self.default_num_cols = 10
-        self.default_required_cols = []
-        self.default_start_row = 2
-        self.default_import_all_sheets = True
+    def get_start_row(self, cfg):
+        return cfg.get("start_row", self.default_start_row)
