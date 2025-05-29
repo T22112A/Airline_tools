@@ -22,7 +22,7 @@ class MyWindow(QWidget):
             cfg["name"]: cfg["table_name"]
             for cfg in self.config.button_configs
             if "table_name" in cfg and cfg["table_name"] is not None
-}
+        }
 
         self.num_cols = self.config.default_num_cols
         self.required_cols = self.config.default_required_cols
@@ -53,10 +53,8 @@ class MyWindow(QWidget):
 
                 if name == "Thoát":
                     button.clicked.connect(QApplication.quit)
-
-                elif name in ["1A Periods", "1A Market Report"]:
+                elif name in ["1A Periods", "1A Market Report", "AIMS Data"]:
                     button.clicked.connect(lambda _, n=name: on_import_clicked(self, n))
-
                 elif name == "Đồng bộ":
                     button.clicked.connect(lambda: export_to_excel_dialog(self))
 

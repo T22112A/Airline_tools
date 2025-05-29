@@ -3,16 +3,18 @@ import pandas as pd
 from datetime import timedelta
 from dateutil import parser
 
-
-def validate_and_format_for_1Aperiods(df, required_cols):
+def _check_and_rename_cols(df, required_cols, col_map):
     for col in required_cols:
         if col not in df.columns:
             raise Exception(f"Thiếu cột: {col}")
+    return df.rename(columns=col_map)
 
-    df = df[df['Route'].astype(str).str.strip().str.upper() != 'NON OPERATING']
+def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
+    df2 = _check_and_rename_cols(df, required_cols, col_map)
+    df2 = df2[df2['Route'].astype(str).str.strip().str.upper() != 'NON OPERATING']
+
     records = []
-
-    for idx, row in df.iterrows():
+    for idx, row in df2.iterrows():
         row = row.copy()
         flight_raw = str(row['Flight']).strip().upper()
         match = re.match(r"^(\S+)[\s\-]+(\S+)$", flight_raw)
@@ -62,20 +64,18 @@ def validate_and_format_for_1Aperiods(df, required_cols):
                 }
                 records.append(new_row)
             cur_date += timedelta(days=1)
-    return pd.DataFrame(records)
+    df_out = pd.DataFrame(records)
+    return df_out[export_cols] if export_cols else df_out
 
-def validate_and_format_for_1A_market_report(df):
+def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_cols):
     day_map = {
         "MON": "1", "TUE": "2", "WED": "3", "THU": "4",
         "FRI": "5", "SAT": "6", "SUN": "7"
     }
-    required_cols = ["Flt Dt", "Al", "Flt", "Day", "Dep", "Brd", "Off", "CAP(C)", "CAP(Y)", "Eqp"]
-    for col in required_cols:
-        if col not in df.columns:
-            raise Exception(f"Thiếu cột: {col}")
+    df2 = _check_and_rename_cols(df, required_cols, col_map)
 
     records = []
-    for idx, row in df.iterrows():
+    for idx, row in df2.iterrows():
         try:
             operation_date = parser.parse(str(row["Flt Dt"]).strip(), dayfirst=True, fuzzy=True)
             ol = str(row["Al"]).strip().upper()
@@ -105,4 +105,46 @@ def validate_and_format_for_1A_market_report(df):
             records.append(new_row)
         except Exception as e:
             raise Exception(f"Lỗi dòng {idx+2}: {e}")
-    return pd.DataFrame(records)
+    df_out = pd.DataFrame(records)
+    return df_out[export_cols] if export_cols else df_out
+
+def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols):
+    import numpy as np
+
+    # Loại bỏ các dòng tổng cuối file
+    def is_footer_row(row):
+        s = str(row["DATE"]).strip().upper()
+        return (
+            s.startswith("TOTAL RECORD") or
+            s.startswith('"GENERATED ON') or
+            s.startswith("GENERATED ON")
+        )
+    df = df[~df.apply(is_footer_row, axis=1)].reset_index(drop=True)
+
+    df2 = _check_and_rename_cols(df, required_cols, col_map)
+
+    # Chuyển DATE thành OperationDate (datetime.date)
+    df2["OperationDate"] = df2["DATE"].apply(
+        lambda d: pd.to_datetime(str(d), dayfirst=True, errors="coerce").date()
+        if pd.notna(d) and str(d).strip() != "" else np.nan
+    )
+    if df2["OperationDate"].isna().any():
+        idxs = df2.index[df2["OperationDate"].isna()]
+        raise Exception(f"Lỗi chuyển đổi ngày tại các dòng: {', '.join(str(i+2) for i in idxs)}")
+
+    # Phân tách cột "AC CONFIG" lấy C (giá trị thứ 2), Y (giá trị thứ 3)
+    c_values, y_values = [], []
+    for i, val in enumerate(df2["AC CONFIG"]):
+        if pd.isna(val) or str(val).strip() == "":
+            c, y = 0, 0
+        else:
+            parts = [int(x) for x in re.findall(r"\d+", str(val))]
+            c = parts[1] if len(parts) > 1 else 0
+            y = parts[2] if len(parts) > 2 else 0
+        c_values.append(c)
+        y_values.append(y)
+    df2["C"] = c_values
+    df2["Y"] = y_values
+
+    df_out = df2[export_cols].copy()
+    return df_out
