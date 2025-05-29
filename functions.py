@@ -2,6 +2,7 @@ import re
 import pandas as pd
 from datetime import timedelta
 from dateutil import parser
+import numpy as np
 
 def _check_and_rename_cols(df, required_cols, col_map):
     for col in required_cols:
@@ -109,9 +110,10 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
     return df_out[export_cols] if export_cols else df_out
 
 def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircraft_table):
-    import numpy as np
+    for col in required_cols:
+        if col not in df.columns:
+            raise Exception(f"Thiếu cột: {col}")
 
-    # Loại bỏ các dòng tổng cuối file
     def is_footer_row(row):
         s = str(row["DATE"]).strip().upper()
         return (
@@ -121,20 +123,19 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
         )
     df = df[~df.apply(is_footer_row, axis=1)].reset_index(drop=True)
 
-    df2 = _check_and_rename_cols(df, required_cols, col_map)
-
-    # Chuyển DATE thành OperationDate (datetime.date)
-    df2["OperationDate"] = df2["DATE"].apply(
+    df["OperationDate"] = df["DATE"].apply(
         lambda d: pd.to_datetime(str(d), dayfirst=True, errors="coerce").date()
         if pd.notna(d) and str(d).strip() != "" else np.nan
     )
-    if df2["OperationDate"].isna().any():
-        idxs = df2.index[df2["OperationDate"].isna()]
+    if df["OperationDate"].isna():
+        idxs = df.index[df["OperationDate"].isna()]
         raise Exception(f"Lỗi chuyển đổi ngày tại các dòng: {', '.join(str(i+2) for i in idxs)}")
 
-    # Phân tách cột "AC CONFIG" lấy C (giá trị thứ 2), Y (giá trị thứ 3)
+    col_map_ = {k: v for k, v in col_map.items() if k != "DATE"}
+    df2 = df.rename(columns=col_map_).copy()
+
     c_values, y_values = [], []
-    for i, val in enumerate(df2["AC CONFIG"]):
+    for val in df2["AC CONFIG"]:
         if pd.isna(val) or str(val).strip() == "":
             c, y = 0, 0
         else:
@@ -146,7 +147,6 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
     df2["C"] = c_values
     df2["Y"] = y_values
 
-    # So sánh RegNr., C, Y với bảng Aircraft
     aircraft_df = pd.DataFrame(aircraft_table["rows"], columns=aircraft_table["columns"])
     aircraft_df["C"] = aircraft_df["C"].astype(int)
     aircraft_df["Y"] = aircraft_df["Y"].astype(int)
@@ -166,5 +166,8 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
             df2.at[idx, "ACV"] = matched.iloc[0]["ACV"]
             df2.at[idx, "SaleableCfg"] = matched.iloc[0]["SaleableCfg"]
 
-    df_out = df2[export_cols].copy()
-    return df_out
+    for col in export_cols:
+        if col not in df2.columns:
+            df2[col] = None
+
+    return df2[export_cols].copy()

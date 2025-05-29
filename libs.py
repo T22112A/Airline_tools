@@ -71,6 +71,9 @@ def import_file_configurable(self, file_path, num_cols, required_cols, start_row
         raise Exception("Định dạng file không được hỗ trợ.")
 
 def load_file_to_dataframe(file_path, num_cols, required_cols, start_row, sheet_name=None):
+    import os
+    import pandas as pd
+
     ext = os.path.splitext(file_path)[-1].lower()
     if ext in ['.xls', '.xlsx']:
         df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
@@ -81,8 +84,10 @@ def load_file_to_dataframe(file_path, num_cols, required_cols, start_row, sheet_
 
     header_row = df.iloc[start_row - 1, :].tolist()
     header_row_stripped = [str(col).strip() if pd.notna(col) else "" for col in header_row]
+
     df_data = df.iloc[start_row:, :]
     df_data.columns = header_row_stripped
+
     df_data = df_data.loc[:, [col for col in df_data.columns if col]]
 
     for col in required_cols:

@@ -86,7 +86,7 @@ class Config:
                 "name": "AIMS Data",
                 "table_name": "AIMS_Data",
                 "required_cols": [
-                    "DATE", "FLT", "TYPE", "REG", "AC", "DEP", "ARR", "STD", "BLOCK", "FLThr", "AC CONFIG"
+                    "DATE", "FLT", "TYPE", "REG", "AC", "DEP", "ARR", "STD", "STA", "BLOCK", "FLThr", "AC CONFIG"
                 ],
                 "col_map": {
                     "DATE": "OperationDate",
