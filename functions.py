@@ -127,7 +127,8 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
         lambda d: pd.to_datetime(str(d), dayfirst=True, errors="coerce").date()
         if pd.notna(d) and str(d).strip() != "" else np.nan
     )
-    if df["OperationDate"].isna():
+    # Sửa lỗi tại đây, dùng .any()
+    if df["OperationDate"].isna().any():
         idxs = df.index[df["OperationDate"].isna()]
         raise Exception(f"Lỗi chuyển đổi ngày tại các dòng: {', '.join(str(i+2) for i in idxs)}")
 
