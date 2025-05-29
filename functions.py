@@ -1,8 +1,8 @@
 import re
 import pandas as pd
+import numpy as np
 from datetime import timedelta
 from dateutil import parser
-import numpy as np
 
 def _check_and_rename_cols(df, required_cols, col_map):
     for col in required_cols:
@@ -54,7 +54,8 @@ def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
                     'OL': ol,
                     'FlightNbr': flight_nbr,
                     'OperationDate': cur_date.date(),
-                    'Frequency': freq_digits,
+                    # Frequency là thứ thực tế của ngày đó (Thứ 2=1,...,Chủ nhật=7)
+                    'Frequency': str(cur_date.isoweekday()),
                     'I/D': row['I/D'],
                     'DEP': dep,
                     'ARR': arr,
@@ -81,10 +82,8 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
             operation_date = parser.parse(str(row["Flt Dt"]).strip(), dayfirst=True, fuzzy=True)
             ol = str(row["Al"]).strip().upper()
             flight_nbr = str(row["Flt"]).strip().upper()
-            freq = day_map.get(str(row["Day"]).strip().upper())
-            if not freq:
-                raise Exception(f"Dòng {idx+2}: Sai định dạng Day: {row['Day']}")
-
+            # Frequency là thứ thực tế của ngày bay
+            freq = str(operation_date.isoweekday())
             std = str(row["Dep"]).strip().upper()
             dep = str(row["Brd"]).strip().upper()
             arr = str(row["Off"]).strip().upper()
@@ -127,7 +126,6 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
         lambda d: pd.to_datetime(str(d), dayfirst=True, errors="coerce").date()
         if pd.notna(d) and str(d).strip() != "" else np.nan
     )
-    # Sửa lỗi tại đây, dùng .any()
     if df["OperationDate"].isna().any():
         idxs = df.index[df["OperationDate"].isna()]
         raise Exception(f"Lỗi chuyển đổi ngày tại các dòng: {', '.join(str(i+2) for i in idxs)}")
@@ -166,6 +164,9 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
         if not matched.empty:
             df2.at[idx, "ACV"] = matched.iloc[0]["ACV"]
             df2.at[idx, "SaleableCfg"] = matched.iloc[0]["SaleableCfg"]
+
+    # Frequency = thứ thực tế của ngày bay
+    df2["Frequency"] = df2["OperationDate"].apply(lambda d: str(pd.Timestamp(d).isoweekday()) if pd.notna(d) else None)
 
     for col in export_cols:
         if col not in df2.columns:
