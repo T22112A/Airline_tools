@@ -144,20 +144,29 @@ def export_to_excel_dialog(self):
         
         
 # --- Biến trạng thái và DataFrame toàn cục cho luồng 1A ---
-# Đầu file (hoặc cuối file libs.py) bổ sung:
 Market_Report_imported = 0
 Periods_imported = 0
 Periods_1A = None
 Market_Report_1A = None
 
-def set_periods_1A(df):
+def validate_and_format_for_1Aperiods(df):
+    """
+    Hàm này sẽ được dùng làm validate_func khi import bảng Periods_1A.
+    Sau khi validate thành công sẽ cập nhật trạng thái và trigger merge nếu cần.
+    """
     global Periods_imported, Periods_1A
+    # TODO: Validate và format df nếu cần
     Periods_1A = df
     Periods_imported = 1
     trigger_merge_if_ready()
 
-def set_market_report_1A(df):
+def validate_and_format_for_1A_market_report(df):
+    """
+    Hàm này sẽ được dùng làm validate_func khi import bảng Market_Report_1A.
+    Sau khi validate thành công sẽ cập nhật trạng thái và trigger merge nếu cần.
+    """
     global Market_Report_imported, Market_Report_1A
+    # TODO: Validate và format df nếu cần
     Market_Report_1A = df
     Market_Report_imported = 1
     trigger_merge_if_ready()
@@ -167,34 +176,27 @@ def trigger_merge_if_ready():
         merge_tables_for_1A()
 
 def merge_tables_for_1A():
+    """
+    Sinh bảng Merged_1A, NOT_in_Market_Report, NOT_in_Periods theo yêu cầu.
+    """
     global Periods_1A, Market_Report_1A
+
     periods_cols = ['OL', 'FlightNbr', 'OperationDate', 'Frequency', 'DEP', 'ARR', 'ACV', 'SaleableCfg']
     market_cols = ['STD', 'C', 'Y', 'ACtype']
+
     periods_df = Periods_1A[periods_cols].copy()
     market_df = Market_Report_1A[['OperationDate', 'OL', 'FlightNbr', 'Frequency', 'DEP', 'ARR'] + market_cols].copy()
+
     merge_keys = ['OperationDate', 'OL', 'FlightNbr', 'Frequency', 'DEP', 'ARR']
     merged = pd.merge(periods_df, market_df, on=merge_keys, how='inner')
     globals()['Merged_1A'] = merged
+
     not_in_market = pd.merge(market_df, periods_df, on=merge_keys, how='left', indicator=True)
     globals()['NOT_in_Market_Report'] = not_in_market[not_in_market['_merge'] == 'left_only'].drop(columns=['_merge'])
+
     not_in_periods = pd.merge(periods_df, market_df, on=merge_keys, how='left', indicator=True)
     globals()['NOT_in_Periods'] = not_in_periods[not_in_periods['_merge'] == 'left_only'].drop(columns=['_merge'])
+
     print("Merged_1A created with shape:", merged.shape)
     print("NOT_in_Market_Report created with shape:", globals()['NOT_in_Market_Report'].shape)
     print("NOT_in_Periods created with shape:", globals()['NOT_in_Periods'].shape)
-
-# Khi gán validate_func cho từng loại:
-for cfg in self.button_configs:
-    if cfg["name"] == "1A Periods":
-        cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"]: (
-            lambda result: (set_periods_1A(result), result)[1]
-        )(validate_and_format_for_1Aperiods(df, rc, cm, ec))
-    elif cfg["name"] == "1A Market Report":
-        cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"]: (
-            lambda result: (set_market_report_1A(result), result)[1]
-        )(validate_and_format_for_1A_market_report(df, rc, cm, ec))
-    elif cfg["name"] == "AIMS Data":
-        cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"], dt=self.data_tables["Aircraft"]: \
-            validate_and_format_for_AIMS(df, rc, cm, ec, dt)
-    else:
-        cfg["validate_func"] = lambda df: df
