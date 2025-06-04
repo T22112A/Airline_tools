@@ -7,7 +7,7 @@ from functions import (
 
 data_tables = {
     "Aircraft": {
-        "columns": ["RegNr.", "ACV", "SaleableCfg", "C", "Z", "Y", "EquipmentType"],
+        "columns": ["RegNr.", "ACV", "SaleableCfg", "C", "Z", "Y", "ACtype"],
         "rows": [
             ["PK-BBK", "BBK", "BBK", 0, 0, 215, 737],
             ["JU-1410", "JU1", "JUA", 0, 0, 180, 320],
@@ -113,7 +113,6 @@ class Config:
                     "TAIL #", "Change code", "Reason", "Service type"
                 ],
                 "col_map": {
-                    "FLT NBR": "FlightNbr",
                     "Board Point": "DEP",
                     "Off Point": "ARR",
                     "DOW": "Frequency",
@@ -126,8 +125,9 @@ class Config:
                     "Service type": "SvType"
                 },
                 "export_cols": [
-                    "FlightNbr", "DEP", "ARR","OperationDate", "Frequency", "STD", "STA", "Change code", "Reason", "SvType",
-                    "C(S)", "Y(S)","RegNr.", "ACV", "SaleableCfg", "C", "Y", "EquipmentType"
+                    "OL", "FlightNbr", "OperationDate", "Frequency", "DEP", "ARR", "ACV", "SaleableCfg",
+                    "STD", "C(S)", "Y(S)", "ACtype", "STA", "RegNr.", "C", "Y",
+                    "Change code", "Reason", "SvType"
                 ],
                 "start_row": 1
             },

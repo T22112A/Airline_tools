@@ -179,11 +179,24 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
 
 
 def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraft_table):
+    import pandas as pd
+
+    # Kiểm tra cột bắt buộc
     for col in required_cols:
         if col not in df.columns:
             raise Exception(f"Thiếu cột bắt buộc: {col}")
 
     df2 = df.rename(columns=col_map).copy()
+
+    # Tách FLT NBR thành OL và FlightNbr
+    flt_col = "FLT NBR" if "FLT NBR" in df.columns else None
+    if flt_col:
+        df2["OL"] = df[flt_col].astype(str).str[:2]
+        df2["FlightNbr"] = df[flt_col].astype(str).str[2:]
+    else:
+        df2["OL"] = ""
+        df2["FlightNbr"] = ""
+
     expanded_rows = []
     aircraft_df = pd.DataFrame(aircraft_table["rows"], columns=aircraft_table["columns"])
 
@@ -194,6 +207,7 @@ def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraf
             continue
         if pd.isna(to_raw) or str(to_raw).strip() == "":
             continue
+
         try:
             from_date = pd.to_datetime(from_raw, errors="coerce", dayfirst=True)
             to_date = pd.to_datetime(to_raw, errors="coerce", dayfirst=True)
@@ -213,42 +227,51 @@ def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraf
                 new_row = row.copy()
                 new_row["OperationDate"] = cur_date.strftime('%d-%b-%y')
                 new_row["Frequency"] = str(cur_date.isoweekday())
-                # Tách New CFG thành C(S) và Y(S)
+
+                # Bổ sung OL và FlightNbr từ row đã tách
+                new_row["OL"] = row.get("OL", "")
+                new_row["FlightNbr"] = row.get("FlightNbr", "")
+
+                # Tách cấu hình ghế
                 cfg_parts = [int(x) for x in str(new_row.get("New CFG", "")).split("/") if x.isdigit()]
                 new_row["C(S)"] = cfg_parts[0] if len(cfg_parts) > 0 else 0
                 new_row["Y(S)"] = cfg_parts[2] if len(cfg_parts) > 2 else 0
 
+                # Ghép thông tin từ bảng aircraft
                 reg = str(new_row.get("TAIL #", "")).strip().upper()
                 match = aircraft_df[aircraft_df["RegNr."].astype(str).str.upper() == reg]
                 if not match.empty:
                     matched_row = match.iloc[0]
-                    new_row["RegNr."] = matched_row["RegNr."]
-                    new_row["ACV"] = matched_row["ACV"]
-                    new_row["SaleableCfg"] = matched_row["SaleableCfg"]
-                    new_row["C"] = matched_row["C"]
-                    new_row["Y"] = matched_row["Y"]
-                    new_row["EquipmentType"] = matched_row["EquipmentType"]
+                    new_row["RegNr."] = matched_row.get("RegNr.", "")
+                    new_row["ACV"] = matched_row.get("ACV", "")
+                    new_row["SaleableCfg"] = matched_row.get("SaleableCfg", "")
+                    new_row["C"] = matched_row.get("C", "")
+                    new_row["Y"] = matched_row.get("Y", "")
+                    new_row["ACtype"] = matched_row.get("ACtype", "")
                 else:
-                    new_row["RegNr."] = ""  # <--- Đúng chuẩn, luôn chuỗi rỗng nếu không tìm thấy
+                    new_row["RegNr."] = ""
                     new_row["ACV"] = ""
                     new_row["SaleableCfg"] = ""
                     new_row["C"] = ""
                     new_row["Y"] = ""
-                    new_row["EquipmentType"] = ""
+                    new_row["ACtype"] = ""
+
                 expanded_rows.append(new_row)
             cur_date += pd.Timedelta(days=1)
 
     df_expanded = pd.DataFrame(expanded_rows)
+
     if df_expanded.empty:
         raise Exception("Không có dòng dữ liệu hợp lệ sau khi tách From/To và DOW")
 
-    # Đảm bảo đủ các cột xuất ra
-    for col in export_cols:
+    # Đảm bảo các cột theo export_cols đều tồn tại
+    final_cols = export_cols
+    for col in final_cols:
         if col not in df_expanded.columns:
             df_expanded[col] = ""
 
-    # Loại NaN trong RegNr. nếu có, chuyển hết về chuỗi rỗng
+    # Làm sạch RegNr.
     if "RegNr." in df_expanded.columns:
         df_expanded["RegNr."] = df_expanded["RegNr."].fillna("")
 
-    return df_expanded[export_cols].reset_index(drop=True)
+    return df_expanded[final_cols].reset_index(drop=True)
