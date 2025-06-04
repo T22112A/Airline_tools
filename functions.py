@@ -47,7 +47,7 @@ def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
                     'Type': row['Type'],
                     'OL': ol,
                     'FlightNbr': flight_nbr,
-                    'OperationDate': cur_date.date(),
+                    'OperationDate': cur_date.strftime('%d-%b-%y'),  # string for DB
                     'Frequency': str(cur_date.isoweekday()),
                     'I/D': row['I/D'],
                     'DEP': dep,
@@ -67,7 +67,6 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
     records = []
     for idx, row in df2.iterrows():
         try:
-            # Dùng parse_1A_date cho ngày!
             operation_date = parse_1A_date(row["Flt Dt"])
             ol = str(row["Al"]).strip().upper()
             flight_nbr = str(row["Flt"]).strip().upper()
@@ -78,7 +77,7 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
             c, y = row["CAP(C)"], row["CAP(Y)"]
             actype = str(row["Eqp"]).strip()
             new_row = {
-                "OperationDate": operation_date,  # Giữ là datetime64[ns]
+                "OperationDate": operation_date.strftime('%d-%b-%y'),  # string for DB
                 "OL": ol,
                 "FlightNbr": flight_nbr,
                 "Frequency": freq,
@@ -124,7 +123,7 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
 
     # Chuyển đổi cột DATE sang định dạng chuẩn
     df["OperationDate"] = df["DATE"].apply(
-        lambda d: try_parse_date(d).date() if pd.notna(d) and str(d).strip() != "" else np.nan
+        lambda d: try_parse_date(d).strftime('%d-%b-%y') if pd.notna(d) and str(d).strip() != "" else np.nan
     )
     if df["OperationDate"].isna().any():
         idxs = df.index[df["OperationDate"].isna()]
@@ -169,7 +168,7 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
             df2.at[idx, "SaleableCfg"] = matched.iloc[0]["SaleableCfg"]
 
     df2["Frequency"] = df2["OperationDate"].apply(
-        lambda d: str(pd.Timestamp(d).isoweekday()) if pd.notna(d) else None
+        lambda d: str(pd.to_datetime(d, format='%d-%b-%y', errors='coerce').isoweekday()) if pd.notna(d) else None
     )
 
     for col in export_cols:
@@ -177,3 +176,71 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
             df2[col] = None
 
     return df2[export_cols].copy()
+
+
+def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraft_table):
+    # Kiểm tra bắt buộc các cột
+    for col in required_cols:
+        if col not in df.columns:
+            raise Exception(f"Thiếu cột bắt buộc: {col}")
+
+    # Đổi tên cột theo col_map
+    df2 = df.rename(columns=col_map).copy()
+    
+    expanded_rows = []
+    for idx, row in df2.iterrows():
+        try:
+            from_date = pd.to_datetime(row["From"])
+            to_date = pd.to_datetime(row["To"])
+        except Exception:
+            continue
+
+        # Xử lý Frequency/DOW giống validate_and_format_for_1Aperiods
+        freq_digits = ''.join([c for c in str(row['Frequency']).strip() if c in '1234567'])
+        if not freq_digits:
+            raise Exception(f"Dòng {idx+2}: Sai định dạng Frequency: {row['Frequency']}")
+        freq_days = set(int(c) for c in freq_digits)
+        
+        cur_date = from_date
+        while cur_date <= to_date:
+            # isoweekday: Monday=1 ... Sunday=7
+            if cur_date.isoweekday() in freq_days:
+                new_row = row.copy()
+                # Gán OperationDate là string dd-mmm-yy để lưu DB
+                new_row["OperationDate"] = cur_date.strftime('%d-%b-%y')
+                # Gán Frequency thực tế cho dòng này
+                new_row["Frequency"] = str(cur_date.isoweekday())
+                expanded_rows.append(new_row)
+            cur_date += pd.Timedelta(days=1)
+    df_expanded = pd.DataFrame(expanded_rows)
+    if df_expanded.empty:
+        raise Exception("Không có dòng dữ liệu hợp lệ sau khi tách From/To và DOW")
+
+    # Xử lý tách New CFG kiểu "8/0/168" thành C(S) và Y(S)
+    c_s, y_s = [], []
+    for val in df_expanded["New CFG"]:
+        parts = [int(x) for x in str(val).split("/") if x.isdigit()]
+        c_s.append(parts[0] if len(parts) > 0 else 0)
+        y_s.append(parts[2] if len(parts) > 2 else 0)
+    df_expanded["C(S)"] = c_s
+    df_expanded["Y(S)"] = y_s
+
+    # Map TAIL # với Aircraft để lấy ACV, SaleableCfg, C, Y, EquipmentType
+    aircraft_df = pd.DataFrame(aircraft_table["rows"], columns=aircraft_table["columns"])
+    df_expanded["ACV"] = ""
+    df_expanded["SaleableCfg"] = ""
+    df_expanded["C"] = ""
+    df_expanded["Y"] = ""
+    df_expanded["EquipmentType"] = ""
+    for idx, row in df_expanded.iterrows():
+        reg = str(row["TAIL #"]).strip().upper()
+        matched = aircraft_df[aircraft_df["RegNr."].astype(str).str.upper() == reg]
+        if not matched.empty:
+            df_expanded.at[idx, "ACV"] = matched.iloc[0]["ACV"]
+            df_expanded.at[idx, "SaleableCfg"] = matched.iloc[0]["SaleableCfg"]
+            df_expanded.at[idx, "C"] = matched.iloc[0]["C"]
+            df_expanded.at[idx, "Y"] = matched.iloc[0]["Y"]
+            df_expanded.at[idx, "EquipmentType"] = matched.iloc[0]["EquipmentType"]
+
+    # Không cần ép lại datetime khi lưu DB (giữ string dd-mmm-yy)
+    return df_expanded[export_cols].reset_index(drop=True)

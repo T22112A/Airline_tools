@@ -1,7 +1,8 @@
 from functions import (
     validate_and_format_for_1Aperiods,
     validate_and_format_for_1A_market_report,
-    validate_and_format_for_AIMS
+    validate_and_format_for_AIMS,
+    validate_and_format_for_SKD
 )
 
 data_tables = {
@@ -104,13 +105,39 @@ class Config:
                 ],
                 "start_row": 3  # Dòng 3 là header thực tế của file AIMS!
             },
-            # Các nút placeholder cho đủ 10 nút
-            {"name": "Cài đặt", "table_name": "CaiDat_Data"},
-            {"name": "Giúp đỡ", "table_name": "Help_Data"},
+            {
+                "name": "SKD Data",
+                "table_name": "SKD_Data",
+                "required_cols": [
+                    "FLT NBR", "Board Point", "Off Point", "From", "To", "DOW", "New ETD (LT)", "New ETA (LT)", "New CFG",
+                    "TAIL #", "Change code", "Reason", "Service type"
+                ],
+                "col_map": {
+                    "FLT NBR": "FlightNbr",
+                    "Board Point": "DEP",
+                    "Off Point": "ARR",
+                    "DOW": "Frequency",
+                    "From": "STD",
+                    "To": "STA",
+                    "New ETD (LT)": "ETD",
+                    "New ETA (LT)": "ETA",
+                    "New CFG": "New CFG",
+                    "TAIL #": "TAIL #",
+                    "Change code": "Change code",
+                    "Reason": "Reason",
+                    "Service type": "SvType"
+                },
+                "export_cols": [
+                    "FlightNbr", "DEP", "ARR", "Frequency", "STD", "STA", "Change code", "Reason", "SvType",
+                    "C(S)", "Y(S)", "ACV", "SaleableCfg", "C", "Y", "EquipmentType", "OperationDate"
+                ],
+                "start_row": 1
+            },
             {"name": "In", "table_name": "In_Data"},
+            {"name": "So sánh AIMS và 1A", "table_name": "Compare_AIMS_1A_Data"},
             {"name": "Tải lên", "table_name": "TaiLen_Data"},
             {"name": "Tìm kiếm", "table_name": "TimKiem_Data"},
-            {"name": "Đồng bộ", "table_name": "DongBo_Data"},
+            {"name": "Xuất dữ liệu DB", "table_name": "DB_Data"},
             {"name": "Thoát", "table_name": None}
         ]
 
@@ -125,6 +152,9 @@ class Config:
             elif cfg["name"] == "AIMS Data":
                 cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"], dt=self.data_tables["Aircraft"]: \
                     validate_and_format_for_AIMS(df, rc, cm, ec, dt)
+            elif cfg["name"] == "SKD Data":
+                cfg["validate_func"] = lambda df, rc=cfg["required_cols"], cm=cfg["col_map"], ec=cfg["export_cols"], dt=self.data_tables["Aircraft"]: \
+                    validate_and_format_for_SKD(df, rc, cm, ec, dt)
             else:
                 cfg["validate_func"] = lambda df: df
 

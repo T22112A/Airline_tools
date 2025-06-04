@@ -42,12 +42,12 @@ class MainUI(QWidget):
 
                 if name == "Thoát":
                     button.clicked.connect(QApplication.quit)
-                elif name in ["1A Periods", "1A Market Report", "AIMS Data"]:
+                elif name in ["1A Periods", "1A Market Report", "AIMS Data", "SKD Data"]:
                     cfg = self.button_configs[index]
                     button.clicked.connect(lambda _, c=cfg: libs.on_import_clicked(self, c))
-                elif name == "Đồng bộ":
+                elif name == "Xuất dữ liệu DB":
                     button.clicked.connect(lambda: libs.export_to_excel_dialog(self))
-                elif name == "Giúp đỡ":
+                elif name == "So sánh AIMS và 1A":
                     button.clicked.connect(self.on_help_clicked)
                 else:
                     # Disable các nút không có sự kiện gán
@@ -62,7 +62,7 @@ class MainUI(QWidget):
     def on_help_clicked(self):
         QMessageBox.information(
             self,
-            "Giúp đỡ",
+            "So sánh AIMS và 1A",
             "Liên hệ admin để được hỗ trợ.",
             buttons=QMessageBox.StandardButton.Ok,
             defaultButton=QMessageBox.StandardButton.NoButton,

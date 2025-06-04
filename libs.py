@@ -133,6 +133,15 @@ def process_and_import_dataframe(self, df, table_name, validate_and_format_func)
     if not processed_df.empty:
         processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
 
+def process_and_import_dataframe(self, df, table_name, validate_and_format_func):
+    """Xử lý dữ liệu theo hàm validate, convert ngày tháng, ghi vào DB."""
+    processed_df = validate_and_format_func(df)
+    # KHÔNG ép lại datetime khi lưu DB, vì đã là string dd-mmm-yy từ validate
+    if not processed_df.empty:
+        processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
+
+
+
 def sanitize_table_name(name):
     """Chuẩn hóa tên bảng SQL (thay ký tự không hợp lệ, thêm tiền tố nếu bắt đầu bằng số)."""
     sanitized = re.sub(r'\W+', '_', name.replace(' ', '_').lower())
@@ -251,6 +260,8 @@ def export_to_excel_dialog(parent: QWidget):
     dialog.setLayout(layout)
     dialog.exec()
 
+
+
 def export_selected_table_to_excel(parent: QWidget, dialog: QDialog, list_widget: QListWidget):
     selected_items = list_widget.selectedItems()
     if not selected_items:
@@ -259,7 +270,6 @@ def export_selected_table_to_excel(parent: QWidget, dialog: QDialog, list_widget
 
     table_names = [item.text() for item in selected_items]
 
-    # Mở dialog lưu file Excel
     save_path, _ = QFileDialog.getSaveFileName(
         parent, "Lưu file Excel", "exported_tables.xlsx", "Excel Files (*.xlsx)"
     )
@@ -267,15 +277,14 @@ def export_selected_table_to_excel(parent: QWidget, dialog: QDialog, list_widget
         return
 
     try:
-        # Ghi nhiều sheet với định dạng ngày tháng chuẩn
         with pd.ExcelWriter(save_path, engine='xlsxwriter', datetime_format='dd-mmm-yy', date_format='dd-mmm-yy') as writer:
             for table_name in table_names:
                 query = f"SELECT * FROM {table_name}"
                 df = pd.read_sql(query, parent.db_engine)
-                # Excel sheet tên max 31 ký tự
+                # Nếu OperationDate là string dd-mmm-yy thì convert lại sang datetime trước khi export
+                if 'OperationDate' in df.columns:
+                    df['OperationDate'] = pd.to_datetime(df['OperationDate'], format='%d-%b-%y', errors='coerce')
                 df.to_excel(writer, sheet_name=table_name[:31], index=False)
-
-        # Thông báo chi tiết các bảng đã xuất
         tables_str = ", ".join(table_names)
         QMessageBox.information(
             parent,
@@ -287,7 +296,6 @@ def export_selected_table_to_excel(parent: QWidget, dialog: QDialog, list_widget
 
     dialog.accept()
 
-
 def export_table_to_excel(parent: QWidget, table_name: str):
     query = f"SELECT * FROM {table_name}"
     df = pd.read_sql(query, parent.db_engine)
@@ -295,6 +303,9 @@ def export_table_to_excel(parent: QWidget, table_name: str):
         parent, f"Lưu file Excel cho bảng {table_name}", f"{table_name}.xlsx", "Excel Files (*.xlsx)"
     )
     if save_path:
+        # Nếu OperationDate là string dd-mmm-yy thì convert lại sang datetime
+        if 'OperationDate' in df.columns:
+            df['OperationDate'] = pd.to_datetime(df['OperationDate'], format='%d-%b-%y', errors='coerce')
         df.to_excel(save_path, index=False)
         QMessageBox.information(
             parent,
