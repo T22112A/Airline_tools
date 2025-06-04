@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import timedelta
 from dateutil import parser
+from libs import parse_1A_date
 
 def _check_and_rename_cols(df, required_cols, col_map):
     for col in required_cols:
@@ -13,7 +14,6 @@ def _check_and_rename_cols(df, required_cols, col_map):
 def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
     df2 = _check_and_rename_cols(df, required_cols, col_map)
     df2 = df2[df2['Route'].astype(str).str.strip().str.upper() != 'NON OPERATING']
-
     records = []
     for idx, row in df2.iterrows():
         row = row.copy()
@@ -25,27 +25,21 @@ def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
                 f"Phải có dạng 'OL FlightNbr', ví dụ 'QH 73' hoặc 'QH-73'."
             )
         ol, flight_nbr = match.groups()
-        start_date = parser.parse(str(row['Start']).strip(), dayfirst=True, fuzzy=True)
+        start_date = parse_1A_date(row['Start'])
         end_val = row['End']
-        end_date = start_date if pd.isna(end_val) or str(end_val).strip() in ["", "nan"] else pd.to_datetime(str(end_val).strip(), format="%d%b%y", errors="coerce")
-        if pd.isna(end_date):
-            raise Exception(f"Dòng {idx+2}: Sai định dạng End: {row['End']}")
-
+        end_date = start_date if pd.isna(end_val) or str(end_val).strip() in ["", "nan"] else parse_1A_date(end_val)
         freq_digits = ''.join([c for c in str(row['Frequency']).strip() if c in '1234567'])
         if not freq_digits:
             raise Exception(f"Dòng {idx+2}: Sai định dạng Frequency: {row['Frequency']}")
         freq_days = set(int(c) for c in freq_digits)
-
         route_str = str(row['Route']).strip().upper()
         if len(route_str) < 7 or '-' not in route_str:
             raise Exception(f"Dòng {idx+2}: Sai định dạng Route: '{row['Route']}' (phải có dạng AAA-BBB)")
         dep, arr = route_str[:3], route_str[-3:]
-
         config_code_str = str(row['Config Code']).strip()
         if len(config_code_str) < 3:
             raise Exception(f"Dòng {idx+2}: Sai định dạng Config Code: '{row['Config Code']}'")
         acv, saleable_cfg = config_code_str[:3], config_code_str[-3:]
-
         cur_date = start_date
         while cur_date <= end_date:
             if cur_date.isoweekday() in freq_days:
@@ -54,7 +48,6 @@ def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
                     'OL': ol,
                     'FlightNbr': flight_nbr,
                     'OperationDate': cur_date.date(),
-                    # Frequency là thứ thực tế của ngày đó (Thứ 2=1,...,Chủ nhật=7)
                     'Frequency': str(cur_date.isoweekday()),
                     'I/D': row['I/D'],
                     'DEP': dep,
@@ -70,28 +63,22 @@ def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
     return df_out[export_cols] if export_cols else df_out
 
 def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_cols):
-    day_map = {
-        "MON": "1", "TUE": "2", "WED": "3", "THU": "4",
-        "FRI": "5", "SAT": "6", "SUN": "7"
-    }
     df2 = _check_and_rename_cols(df, required_cols, col_map)
-
     records = []
     for idx, row in df2.iterrows():
         try:
-            operation_date = parser.parse(str(row["Flt Dt"]).strip(), dayfirst=True, fuzzy=True)
+            # Dùng parse_1A_date cho ngày!
+            operation_date = parse_1A_date(row["Flt Dt"])
             ol = str(row["Al"]).strip().upper()
             flight_nbr = str(row["Flt"]).strip().upper()
-            # Frequency là thứ thực tế của ngày bay
             freq = str(operation_date.isoweekday())
-            std = str(row["Dep"]).strip().upper()
-            dep = str(row["Brd"]).strip().upper()
-            arr = str(row["Off"]).strip().upper()
+            std = str(row["Dep"]).strip()
+            dep = str(row["Brd"]).strip()
+            arr = str(row["Off"]).strip()
             c, y = row["CAP(C)"], row["CAP(Y)"]
-            actype = str(row["Eqp"]).strip().upper()
-
+            actype = str(row["Eqp"]).strip()
             new_row = {
-                "OperationDate": operation_date.date(),
+                "OperationDate": operation_date,  # Giữ là datetime64[ns]
                 "OL": ol,
                 "FlightNbr": flight_nbr,
                 "Frequency": freq,
@@ -104,9 +91,12 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
             }
             records.append(new_row)
         except Exception as e:
-            raise Exception(f"Lỗi dòng {idx+2}: {e}")
+            print(f"Lỗi dòng {idx+2}: {e}")
+            raise
     df_out = pd.DataFrame(records)
-    return df_out[export_cols] if export_cols else df_out
+    if export_cols:
+        return df_out[export_cols]
+    return df_out
 
 def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircraft_table):
     for col in required_cols:

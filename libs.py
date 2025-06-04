@@ -3,6 +3,8 @@ import re
 import pandas as pd
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 from sqlalchemy import inspect
+from dateutil import parser
+import datetime
 
 def on_import_clicked(window, cfg):
     start_row = cfg.get("start_row", window.config.default_start_row)
@@ -99,6 +101,11 @@ def load_file_to_dataframe(file_path, num_cols, required_cols, start_row, sheet_
 
 def process_and_import_dataframe(self, df, table_name, validate_and_format_func):
     processed_df = validate_and_format_func(df)
+    # Đảm bảo OperationDate đúng kiểu datetime64
+    if "OperationDate" in processed_df.columns:
+        processed_df["OperationDate"] = pd.to_datetime(processed_df["OperationDate"], errors="raise")
+    print(processed_df.dtypes)  # Debug: phải thấy datetime64[ns] cho OperationDate
+    print(processed_df.head())  # Debug: phải thấy yyyy-mm-dd đúng
     if not processed_df.empty:
         processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
 
@@ -108,39 +115,34 @@ def sanitize_table_name(name):
         sanitized = f'table_{sanitized}'
     return sanitized
 
-def export_to_excel_dialog(self):
-    file_path, _ = QFileDialog.getSaveFileName(
-        self,
-        "Chọn nơi lưu file Excel",
-        "",
-        "Excel files (*.xlsx)"
+def parse_1A_date(date_str):
+    if isinstance(date_str, (pd.Timestamp, datetime.datetime, datetime.date)):
+        # Nếu là datetime, trả về đúng luôn
+        return pd.to_datetime(date_str)
+    date_str = str(date_str).strip()
+    if not date_str or date_str.lower() == 'nan':
+        raise ValueError("Chuỗi ngày rỗng hoặc 'nan'")
+    # Normalize tháng
+    date_str = re.sub(
+        r"(\d{2})([\/\-])([A-Z]{3})([\/\-])(\d{2,4})",
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3).title()}{m.group(4)}{m.group(5)}",
+        date_str.upper()
     )
-    if not file_path:
-        return
-
-    if not file_path.lower().endswith(".xlsx"):
-        file_path += ".xlsx"
-
+    date_str = re.sub(
+        r"(\d{2})([A-Z]{3})(\d{2,4})",
+        lambda m: f"{m.group(1)}{m.group(2).title()}{m.group(3)}",
+        date_str.upper()
+    )
+    for fmt in ("%d%b%y", "%d%b%Y", "%d-%b-%y", "%d-%b-%Y", "%d/%b/%y", "%d/%b/%Y",
+                "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%Y-%m-%d"):
+        try:
+            return pd.to_datetime(date_str, format=fmt, errors="raise", dayfirst=True)
+        except Exception:
+            continue
     try:
-        inspector = inspect(self.db_engine)
-        table_names = inspector.get_table_names()
-        if not table_names:
-            QMessageBox.warning(self, "Không có dữ liệu", "Không có bảng dữ liệu nào để xuất ra.")
-            return
-
-        with pd.ExcelWriter(file_path, engine='xlsxwriter', datetime_format='dd-mmm-yy', date_format='dd-mmm-yy') as writer:
-            for table in table_names:
-                df = pd.read_sql_table(table, self.db_engine)
-                if 'OperationDate' in df.columns:
-                    df['OperationDate'] = pd.to_datetime(df['OperationDate'], errors='coerce')
-                df.to_excel(writer, sheet_name=table[:31], index=False)
-                worksheet = writer.sheets[table[:31]]
-                if 'OperationDate' in df.columns:
-                    col_idx = df.columns.get_loc('OperationDate')
-                    worksheet.set_column(col_idx, col_idx, 15)
-        QMessageBox.information(self, "Xuất Excel", "Dữ liệu đã được xuất ra Excel thành công!")
-    except Exception as e:
-        QMessageBox.critical(self, "Lỗi Xuất Excel", str(e))
+        return parser.parse(date_str, dayfirst=True, fuzzy=True)
+    except Exception:
+        raise ValueError(f"Sai định dạng ngày: '{date_str}'")
         
         
 # --- Biến trạng thái và DataFrame toàn cục cho luồng 1A ---
