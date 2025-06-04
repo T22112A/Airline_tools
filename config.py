@@ -117,10 +117,8 @@ class Config:
                     "Board Point": "DEP",
                     "Off Point": "ARR",
                     "DOW": "Frequency",
-                    "From": "STD",
-                    "To": "STA",
-                    "New ETD (LT)": "ETD",
-                    "New ETA (LT)": "ETA",
+                    "New ETD (LT)": "STD",
+                    "New ETA (LT)": "STA",
                     "New CFG": "New CFG",
                     "TAIL #": "TAIL #",
                     "Change code": "Change code",
@@ -128,8 +126,8 @@ class Config:
                     "Service type": "SvType"
                 },
                 "export_cols": [
-                    "FlightNbr", "DEP", "ARR", "Frequency", "STD", "STA", "Change code", "Reason", "SvType",
-                    "C(S)", "Y(S)", "ACV", "SaleableCfg", "C", "Y", "EquipmentType", "OperationDate"
+                    "FlightNbr", "DEP", "ARR","OperationDate", "Frequency", "STD", "STA", "Change code", "Reason", "SvType",
+                    "C(S)", "Y(S)","RegNr.", "ACV", "SaleableCfg", "C", "Y", "EquipmentType"
                 ],
                 "start_row": 1
             },
