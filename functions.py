@@ -120,19 +120,31 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
             s.startswith('"GENERATED ON') or
             s.startswith("GENERATED ON")
         )
+
+    def try_parse_date(val):
+        val = str(val).strip()
+        for fmt in ("%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%d%b%y", "%d-%b-%y", "%Y-%m-%d"):
+            try:
+                return pd.to_datetime(val, format=fmt, errors="raise")
+            except Exception:
+                continue
+        return pd.to_datetime(val, dayfirst=True, errors="coerce")  # fallback
+
     df = df[~df.apply(is_footer_row, axis=1)].reset_index(drop=True)
 
+    # Chuyển đổi cột DATE sang định dạng chuẩn
     df["OperationDate"] = df["DATE"].apply(
-        lambda d: pd.to_datetime(str(d), dayfirst=True, errors="coerce").date()
-        if pd.notna(d) and str(d).strip() != "" else np.nan
+        lambda d: try_parse_date(d).date() if pd.notna(d) and str(d).strip() != "" else np.nan
     )
     if df["OperationDate"].isna().any():
         idxs = df.index[df["OperationDate"].isna()]
         raise Exception(f"Lỗi chuyển đổi ngày tại các dòng: {', '.join(str(i+2) for i in idxs)}")
 
+    # Đổi tên cột (trừ DATE đã xử lý riêng)
     col_map_ = {k: v for k, v in col_map.items() if k != "DATE"}
     df2 = df.rename(columns=col_map_).copy()
 
+    # Tách cấu hình AC CONFIG thành C/Y
     c_values, y_values = [], []
     for val in df2["AC CONFIG"]:
         if pd.isna(val) or str(val).strip() == "":
@@ -146,6 +158,7 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
     df2["C"] = c_values
     df2["Y"] = y_values
 
+    # Ánh xạ thông tin từ bảng máy bay
     aircraft_df = pd.DataFrame(aircraft_table["rows"], columns=aircraft_table["columns"])
     aircraft_df["C"] = aircraft_df["C"].astype(int)
     aircraft_df["Y"] = aircraft_df["Y"].astype(int)
@@ -165,8 +178,9 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
             df2.at[idx, "ACV"] = matched.iloc[0]["ACV"]
             df2.at[idx, "SaleableCfg"] = matched.iloc[0]["SaleableCfg"]
 
-    # Frequency = thứ thực tế của ngày bay
-    df2["Frequency"] = df2["OperationDate"].apply(lambda d: str(pd.Timestamp(d).isoweekday()) if pd.notna(d) else None)
+    df2["Frequency"] = df2["OperationDate"].apply(
+        lambda d: str(pd.Timestamp(d).isoweekday()) if pd.notna(d) else None
+    )
 
     for col in export_cols:
         if col not in df2.columns:

@@ -1,12 +1,13 @@
 import sys
+import pandas as pd
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout
+    QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 
-from config import Config
-from libs import on_import_clicked, export_to_excel_dialog
+import config
+import libs  # dùng trực tiếp libs.<function>
 
 class MyWindow(QWidget):
     def __init__(self):
@@ -14,7 +15,7 @@ class MyWindow(QWidget):
         self.setWindowTitle("10 Nút (2 cột × 5 hàng) với Hình nền - QVBoxLayout")
         self.setFixedSize(600, 500)
 
-        self.config = Config()
+        self.config = config.Config()
         self.button_configs = self.config.button_configs
         self.button_names = [cfg["name"] for cfg in self.button_configs]
         self.background_images = self.config.background_images
@@ -49,11 +50,12 @@ class MyWindow(QWidget):
                 if name == "Thoát":
                     button.clicked.connect(QApplication.quit)
                 elif name in ["1A Periods", "1A Market Report", "AIMS Data"]:
-                    # Lấy đúng config của nút
                     cfg = self.button_configs[index]
-                    button.clicked.connect(lambda _, c=cfg: on_import_clicked(self, c))
+                    button.clicked.connect(lambda _, c=cfg: libs.on_import_clicked(self, c))
                 elif name == "Đồng bộ":
-                    button.clicked.connect(lambda: export_to_excel_dialog(self))
+                    button.clicked.connect(lambda: libs.export_to_excel_dialog(self))
+                elif name == "Giúp đỡ":
+                    button.clicked.connect(self.on_help_clicked)
 
                 button.setStyleSheet(f"""
                     QPushButton {{
@@ -81,6 +83,53 @@ class MyWindow(QWidget):
         main_layout.addLayout(row_layout)
         self.setLayout(main_layout)
 
+    def on_help_clicked(self):
+        inspector = inspect(self.db_engine)
+        existing_tables = inspector.get_table_names()
+
+        required_tables = {"Market_Report_1A", "Periods_1A"}
+        missing = required_tables - set(existing_tables)
+
+        if missing:
+            QMessageBox.warning(self, "Thiếu dữ liệu", f"Thiếu bảng: {', '.join(missing)}. Vui lòng import đủ dữ liệu.")
+            return
+
+        try:
+            # Tải lại dữ liệu từ database và gán vào biến toàn cục
+            libs.Periods_1A = pd.read_sql("Periods_1A", self.db_engine)
+            libs.Market_Report_1A = pd.read_sql("Market_Report_1A", self.db_engine)
+            libs.merge_tables_for_1A()
+
+            # Ghi các bảng kết quả vào database
+            libs.Merged_1A.to_sql("Merged_1A", self.db_engine, if_exists="replace", index=False)
+            libs.NOT_in_Market_Report.to_sql("NOT_in_Market_Report", self.db_engine, if_exists="replace", index=False)
+            libs.NOT_in_Periods.to_sql("NOT_in_Periods", self.db_engine, if_exists="replace", index=False)
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi xử lý dữ liệu", f"Lỗi khi tạo bảng: {str(e)}")
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(self, "Lưu kết quả dưới dạng Excel", "Result_AIMS_1A.xlsx", "Excel files (*.xlsx)")
+        if not save_path:
+            return
+
+        if not save_path.lower().endswith(".xlsx"):
+            save_path += ".xlsx"
+
+        try:
+            with pd.ExcelWriter(save_path, engine='xlsxwriter', datetime_format='dd-mmm-yy', date_format='dd-mmm-yy') as writer:
+                dataframes = {
+                    "Merged_1A": libs.Merged_1A,
+                    "NOT_in_Market_Report": libs.NOT_in_Market_Report,
+                    "NOT_in_Periods": libs.NOT_in_Periods
+                }
+
+                for sheet_name, df in dataframes.items():
+                    if df is not None and not df.empty:
+                        df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+            QMessageBox.information(self, "Hoàn tất", f"Đã tạo bảng và lưu file: {save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi ghi file", str(e))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
