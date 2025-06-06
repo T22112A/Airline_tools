@@ -3,10 +3,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMessageBox, QFileDialog
 )
 from sqlalchemy import create_engine, inspect
-from config import Config
 import pandas as pd
 import libs
-import functions  # file xử lý logic
+import functions
+from config import Config
 
 class MainUI(QWidget):
     def __init__(self):
@@ -76,7 +76,7 @@ class MainUI(QWidget):
             QMessageBox.critical(self, "Lỗi xử lý", f"Lỗi khi xử lý so sánh AIMS-1A: {str(e)}")
             return
 
-        self.save_excel_results(dataframes, default_name="Result_AIMS_1A.xlsx")
+        self.save_excel_results(dataframes, default_name="Compare_AIMS_1A_Data.xlsx")
 
     def on_compare_skd_1a_clicked(self):
         inspector = inspect(self.db_engine)

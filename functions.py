@@ -1,10 +1,9 @@
 import re
 import pandas as pd
 import numpy as np
-import libs
 from datetime import timedelta
 from dateutil import parser
-
+import libs
 
 def _check_and_rename_cols(df, required_cols, col_map):
     for col in required_cols:
@@ -12,6 +11,36 @@ def _check_and_rename_cols(df, required_cols, col_map):
             raise Exception(f"Thiếu cột: {col}")
     return df.rename(columns=col_map)
 
+def parse_1A_date(date_str):
+    """Parse các định dạng ngày tháng đặc biệt cho dữ liệu 1A."""
+    if isinstance(date_str, (pd.Timestamp, pd.Timestamp, pd.Timestamp)):
+        return pd.to_datetime(date_str)
+
+    date_str = str(date_str).strip()
+    if not date_str or date_str.lower() == 'nan':
+        raise ValueError("Chuỗi ngày rỗng hoặc 'nan'")
+
+    date_str = re.sub(
+        r"(\d{2})([\/\-])([A-Z]{3})([\/\-])(\d{2,4})",
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3).title()}{m.group(4)}{m.group(5)}",
+        date_str.upper()
+    )
+    date_str = re.sub(
+        r"(\d{2})([A-Z]{3})(\d{2,4})",
+        lambda m: f"{m.group(1)}{m.group(2).title()}{m.group(3)}",
+        date_str.upper()
+    )
+
+    for fmt in ("%d%b%y", "%d%b%Y", "%d-%b-%y", "%d-%b-%Y", "%d/%b/%y", "%d/%b/%Y",
+                "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%Y-%m-%d"):
+        try:
+            return pd.to_datetime(date_str, format=fmt, errors="raise", dayfirst=True)
+        except Exception:
+            continue
+    try:
+        return parser.parse(date_str, dayfirst=True, fuzzy=True)
+    except Exception:
+        raise ValueError(f"Sai định dạng ngày: '{date_str}'")
 
 def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
     df2 = _check_and_rename_cols(df, required_cols, col_map)
@@ -79,7 +108,7 @@ def validate_and_format_for_1A_market_report(df, required_cols, col_map, export_
             c, y = row["CAP(C)"], row["CAP(Y)"]
             actype = str(row["Eqp"]).strip()
             new_row = {
-                "OperationDate": operation_date.strftime('%d-%b-%y'),  # string for DB
+                "OperationDate": operation_date.strftime('%d-%b-%y'),
                 "OL": ol,
                 "FlightNbr": flight_nbr,
                 "Frequency": freq,
@@ -119,11 +148,10 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
                 return pd.to_datetime(val, format=fmt, errors="raise")
             except Exception:
                 continue
-        return pd.to_datetime(val, dayfirst=True, errors="coerce")  # fallback
+        return pd.to_datetime(val, dayfirst=True, errors="coerce")
 
     df = df[~df.apply(is_footer_row, axis=1)].reset_index(drop=True)
 
-    # Chuyển đổi cột DATE sang định dạng chuẩn
     df["OperationDate"] = df["DATE"].apply(
         lambda d: try_parse_date(d).strftime('%d-%b-%y') if pd.notna(d) and str(d).strip() != "" else np.nan
     )
@@ -131,11 +159,9 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
         idxs = df.index[df["OperationDate"].isna()]
         raise Exception(f"Lỗi chuyển đổi ngày tại các dòng: {', '.join(str(i+2) for i in idxs)}")
 
-    # Đổi tên cột (trừ DATE đã xử lý riêng)
     col_map_ = {k: v for k, v in col_map.items() if k != "DATE"}
     df2 = df.rename(columns=col_map_).copy()
 
-    # Tách cấu hình AC CONFIG thành C/Y
     c_values, y_values = [], []
     for val in df2["AC CONFIG"]:
         if pd.isna(val) or str(val).strip() == "":
@@ -149,7 +175,6 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
     df2["C"] = c_values
     df2["Y"] = y_values
 
-    # Ánh xạ thông tin từ bảng máy bay
     aircraft_df = pd.DataFrame(aircraft_table["rows"], columns=aircraft_table["columns"])
     aircraft_df["C"] = aircraft_df["C"].astype(int)
     aircraft_df["Y"] = aircraft_df["Y"].astype(int)
@@ -179,18 +204,12 @@ def validate_and_format_for_AIMS(df, required_cols, col_map, export_cols, aircra
 
     return df2[export_cols].copy()
 
-
 def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraft_table):
-    import pandas as pd
-
-    # Kiểm tra cột bắt buộc
     for col in required_cols:
         if col not in df.columns:
             raise Exception(f"Thiếu cột bắt buộc: {col}")
 
     df2 = df.rename(columns=col_map).copy()
-
-    # Tách FLT NBR thành OL và FlightNbr
     flt_col = "FLT NBR" if "FLT NBR" in df.columns else None
     if flt_col:
         df2["OL"] = df[flt_col].astype(str).str[:2]
@@ -230,16 +249,13 @@ def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraf
                 new_row["OperationDate"] = cur_date.strftime('%d-%b-%y')
                 new_row["Frequency"] = str(cur_date.isoweekday())
 
-                # Bổ sung OL và FlightNbr từ row đã tách
                 new_row["OL"] = row.get("OL", "")
                 new_row["FlightNbr"] = row.get("FlightNbr", "")
 
-                # Tách cấu hình ghế
                 cfg_parts = [int(x) for x in str(new_row.get("New CFG", "")).split("/") if x.isdigit()]
                 new_row["C(S)"] = cfg_parts[0] if len(cfg_parts) > 0 else 0
                 new_row["Y(S)"] = cfg_parts[2] if len(cfg_parts) > 2 else 0
 
-                # Ghép thông tin từ bảng aircraft
                 reg = str(new_row.get("TAIL #", "")).strip().upper()
                 match = aircraft_df[aircraft_df["RegNr."].astype(str).str.upper() == reg]
                 if not match.empty:
@@ -266,37 +282,25 @@ def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraf
     if df_expanded.empty:
         raise Exception("Không có dòng dữ liệu hợp lệ sau khi tách From/To và DOW")
 
-    # Đảm bảo các cột theo export_cols đều tồn tại
     final_cols = export_cols
     for col in final_cols:
         if col not in df_expanded.columns:
             df_expanded[col] = ""
 
-    # Làm sạch RegNr.
     if "RegNr." in df_expanded.columns:
         df_expanded["RegNr."] = df_expanded["RegNr."].fillna("")
 
     return df_expanded[final_cols].reset_index(drop=True)
 
-
 def process_merge_1a(db_engine):
-    """
-    Đọc bảng Periods_1A và Market_Report_1A, merge, lưu vào DB và trả về các DataFrame:
-    - merged (Merged_1A)
-    - not_in_market (NOT_in_Market_Report)
-    - not_in_periods (NOT_in_Periods)
-    """
-    merged, not_in_market, not_in_periods = libs.create_merged_1a(db_engine)
-    # Lưu vào DB
+    # SỬA: dùng merge_1a_from_db thay cho create_merged_1a
+    merged, not_in_market, not_in_periods = libs.merge_1a_from_db(db_engine)
     merged.to_sql("Merged_1A", db_engine, if_exists="replace", index=False)
     not_in_market.to_sql("NOT_in_Market_Report", db_engine, if_exists="replace", index=False)
     not_in_periods.to_sql("NOT_in_Periods", db_engine, if_exists="replace", index=False)
     return merged, not_in_market, not_in_periods
 
 def process_compare_aims_1a(db_engine):
-    """
-    Tạo Merged_1A và các bảng liên quan, trả về dict các DataFrame để xuất Excel
-    """
     merged, not_in_market, not_in_periods = process_merge_1a(db_engine)
     return {
         "Merged_1A": merged,
@@ -305,19 +309,11 @@ def process_compare_aims_1a(db_engine):
     }
 
 def process_compare_skd_1a(db_engine):
-    """
-    Tạo Merged_1A nếu cần, so sánh với SKD_Data, trả về dict các DataFrame để xuất Excel
-    """
-    # Đảm bảo đã có Merged_1A (gọi lại merge nếu cần)
     merged, _, _ = process_merge_1a(db_engine)
-
-    # Đọc SKD_Data và Merged_1A từ DB (đồng nhất kiểu cột)
     skd_data = pd.read_sql("SKD_Data", db_engine)
     merged_1a = pd.read_sql("Merged_1A", db_engine)
 
     compare_result, still_in_market_report = libs.compare_skd_and_1a(skd_data, merged_1a)
-
-    # Lưu vào DB
     compare_result.to_sql("Compare_SKD_1A_Data", db_engine, if_exists="replace", index=False)
     if still_in_market_report is not None and not still_in_market_report.empty:
         still_in_market_report.to_sql("STILL_in_Market_Report", db_engine, if_exists="replace", index=False)
@@ -325,36 +321,3 @@ def process_compare_skd_1a(db_engine):
         "Compare_SKD_1A_Data": compare_result,
         "STILL_in_Market_Report": still_in_market_report
     }
-
-
-def parse_1A_date(date_str):
-    """Parse các định dạng ngày tháng đặc biệt cho dữ liệu 1A."""
-    if isinstance(date_str, (pd.Timestamp, datetime.datetime, datetime.date)):
-        return pd.to_datetime(date_str)
-
-    date_str = str(date_str).strip()
-    if not date_str or date_str.lower() == 'nan':
-        raise ValueError("Chuỗi ngày rỗng hoặc 'nan'")
-
-    date_str = re.sub(
-        r"(\d{2})([\/\-])([A-Z]{3})([\/\-])(\d{2,4})",
-        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3).title()}{m.group(4)}{m.group(5)}",
-        date_str.upper()
-    )
-    date_str = re.sub(
-        r"(\d{2})([A-Z]{3})(\d{2,4})",
-        lambda m: f"{m.group(1)}{m.group(2).title()}{m.group(3)}",
-        date_str.upper()
-    )
-
-    for fmt in ("%d%b%y", "%d%b%Y", "%d-%b-%y", "%d-%b-%Y", "%d/%b/%y", "%d/%b/%Y",
-                "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%Y-%m-%d"):
-        try:
-            return pd.to_datetime(date_str, format=fmt, errors="raise", dayfirst=True)
-        except Exception:
-            continue
-
-    try:
-        return parser.parse(date_str, dayfirst=True, fuzzy=True)
-    except Exception:
-        raise ValueError(f"Sai định dạng ngày: '{date_str}'")

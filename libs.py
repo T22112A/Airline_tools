@@ -1,54 +1,37 @@
 import os
 import re
 import pandas as pd
-import datetime
-import config
+import functions  # <--- Thêm dòng này
 from PyQt6.QtWidgets import (
     QWidget, QFileDialog, QMessageBox, QDialog,
     QListWidget, QPushButton, QVBoxLayout, QLabel
 )
-from PyQt6.QtCore import Qt
 from sqlalchemy import inspect
-from dateutil import parser
-from functions import (
-    validate_and_format_for_1Aperiods,
-    validate_and_format_for_1A_market_report,
-    validate_and_format_for_AIMS,
-    validate_and_format_for_SKD,
-)
-
-
-
-# ======== Import chung cho nhiều loại dữ liệu ========
+from config import Config
 
 def on_import_clicked(window, cfg):
-    """Xử lý khi nhấn nút import, gán validate function rồi gọi import."""
-
-
-    # Gán validate_func tùy theo tên
     name = cfg.get("name", "")
     if name == "1A Periods":
-        cfg["validate_func"] = lambda df: validate_and_format_for_1Aperiods(
+        cfg["validate_func"] = lambda df: functions.validate_and_format_for_1Aperiods(
             df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"]
         )
     elif name == "1A Market Report":
-        cfg["validate_func"] = lambda df: validate_and_format_for_1A_market_report(
+        cfg["validate_func"] = lambda df: functions.validate_and_format_for_1A_market_report(
             df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"]
         )
     elif name == "AIMS Data":
         aircraft_table = window.config.data_tables["Aircraft"]
-        cfg["validate_func"] = lambda df: validate_and_format_for_AIMS(
+        cfg["validate_func"] = lambda df: functions.validate_and_format_for_AIMS(
             df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"], aircraft_table
         )
     elif name == "SKD Data":
         aircraft_table = window.config.data_tables["Aircraft"]
-        cfg["validate_func"] = lambda df: validate_and_format_for_SKD(
+        cfg["validate_func"] = lambda df: functions.validate_and_format_for_SKD(
             df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"], aircraft_table
         )
     else:
-        cfg["validate_func"] = lambda df: df  # fallback: không xử lý gì
+        cfg["validate_func"] = lambda df: df  # fallback
 
-    # Tiếp tục như cũ
     start_row = cfg.get("start_row", window.config.default_start_row)
     num_cols = cfg.get("num_cols", window.config.default_num_cols)
     required_cols = cfg.get("required_cols", window.config.default_required_cols)
@@ -159,21 +142,10 @@ def format_dataframe(df, required_cols, start_row):
     return df_data[required_cols].reset_index(drop=True)
 
 def process_and_import_dataframe(self, df, table_name, validate_and_format_func):
-    """Xử lý dữ liệu theo hàm validate, convert ngày tháng, ghi vào DB."""
+    """Xử lý dữ liệu theo hàm validate, ghi vào DB."""
     processed_df = validate_and_format_func(df)
-    if "OperationDate" in processed_df.columns:
-        processed_df["OperationDate"] = pd.to_datetime(processed_df["OperationDate"], errors="raise")
     if not processed_df.empty:
         processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
-
-def process_and_import_dataframe(self, df, table_name, validate_and_format_func):
-    """Xử lý dữ liệu theo hàm validate, convert ngày tháng, ghi vào DB."""
-    processed_df = validate_and_format_func(df)
-    # KHÔNG ép lại datetime khi lưu DB, vì đã là string dd-mmm-yy từ validate
-    if not processed_df.empty:
-        processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
-
-
 
 def sanitize_table_name(name):
     """Chuẩn hóa tên bảng SQL (thay ký tự không hợp lệ, thêm tiền tố nếu bắt đầu bằng số)."""
@@ -182,51 +154,131 @@ def sanitize_table_name(name):
         sanitized = f'table_{sanitized}'
     return sanitized
 
+# ======== Merge và So sánh 1A, SKD, AIMS chỉ trên DB ========
 
+def merge_1a_from_db(db_engine):
+    """
+    Đọc Periods_1A và Market_Report_1A từ DB, merge và trả về các DataFrame.
+    """
+    periods = pd.read_sql("Periods_1A", db_engine)
+    market = pd.read_sql("Market_Report_1A", db_engine)
+    join_cols = ["OL", "FlightNbr", "OperationDate", "Frequency", "DEP", "ARR"]
+    merged = pd.merge(periods, market, how="inner", on=join_cols)
+    not_in_market = periods[~periods.set_index(join_cols).index.isin(market.set_index(join_cols).index)].reset_index(drop=True)
+    not_in_periods = market[~market.set_index(join_cols).index.isin(periods.set_index(join_cols).index)].reset_index(drop=True)
+    return merged, not_in_market, not_in_periods
 
-# ======== Xử lý dữ liệu đặc biệt cho 1A ========
+def process_merge_1a(db_engine):
+    """
+    Merge Periods_1A và Market_Report_1A từ DB, lưu lại các bảng kết quả vào DB và trả về DataFrame
+    """
+    merged, not_in_market, not_in_periods = merge_1a_from_db(db_engine)
+    merged.to_sql("Merged_1A", db_engine, if_exists="replace", index=False)
+    not_in_market.to_sql("NOT_in_Market_Report", db_engine, if_exists="replace", index=False)
+    not_in_periods.to_sql("NOT_in_Periods", db_engine, if_exists="replace", index=False)
+    return merged, not_in_market, not_in_periods
 
-Market_Report_imported = 0
-Periods_imported = 0
-Periods_1A = None
-Market_Report_1A = None
-Merged_1A = None
-NOT_in_Market_Report = None
-NOT_in_Periods = None
+def process_compare_aims_1a(db_engine):
+    """
+    Tạo Merged_1A và các bảng liên quan, trả về dict các DataFrame để xuất Excel
+    """
+    merged, not_in_market, not_in_periods = process_merge_1a(db_engine)
+    return {
+        "Merged_1A": merged,
+        "NOT_in_Market_Report": not_in_market,
+        "NOT_in_Periods": not_in_periods
+    }
 
-def validate_and_format_for_1Aperiods(df):
-    global Periods_imported, Periods_1A
-    Periods_1A = df
-    Periods_imported = 1
-    trigger_merge_if_ready()
+def compare_skd_and_1a(skd_data, merged_1a):
+    """
+    So sánh dữ liệu SKD_Data với Merged_1A:
+    - EQT/CON: so trường cấu hình
+    - TIM: so trường thời gian
+    - CNL: các dòng có ở SKD_Data mà không có ở Merged_1A
+    Trả về: compare_result, still_in_market_report
+    """
+    result_list = []
+    still_in_market_report = None
 
-def validate_and_format_for_1A_market_report(df):
-    global Market_Report_imported, Market_Report_1A
-    Market_Report_1A = df
-    Market_Report_imported = 1
-    trigger_merge_if_ready()
+    eqt_con_fields = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','ACV','SaleableCfg','C(S)','Y(S)','ACtype']
+    eqt_con_fields_1a = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','ACV','SaleableCfg','C','Y','ACtype']
+    tim_fields = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','STD','ACtype']
+    cnl_fields = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','Change code','Reason','SvType']
 
-def trigger_merge_if_ready():
-    if Periods_imported == 1 and Market_Report_imported == 1:
-        merge_tables_for_1A()
+    all_required_cols = set(eqt_con_fields + eqt_con_fields_1a + tim_fields + cnl_fields)
+    for col in all_required_cols:
+        if col not in skd_data.columns:
+            skd_data[col] = ""
+        if col not in merged_1a.columns:
+            merged_1a[col] = ""
 
-def merge_tables_for_1A():
-    global Periods_1A, Market_Report_1A, Merged_1A, NOT_in_Market_Report, NOT_in_Periods
+    # 1. EQT hoặc CON: so trường cấu hình
+    mask_eqt_con = skd_data['Change code'].isin(['EQT', 'CON'])
+    if mask_eqt_con.any():
+        skd_eqt_con = skd_data[eqt_con_fields].copy()
+        skd_eqt_con = skd_eqt_con.rename(columns={'C(S)': 'C', 'Y(S)': 'Y'})
+        merged_eqt_con = merged_1a[eqt_con_fields_1a].copy()
+        merged_eqt_con = merged_eqt_con.astype(str)
+        skd_eqt_con = skd_eqt_con[eqt_con_fields_1a].astype(str)
+        df_eqt_con = pd.merge(skd_eqt_con, merged_eqt_con, how='inner', on=eqt_con_fields_1a)
+        if not df_eqt_con.empty:
+            df_eqt_con['Change code'] = 'EQT/CON'
+            result_list.append(df_eqt_con)
 
-    periods_cols = ['OL', 'FlightNbr', 'OperationDate', 'Frequency', 'DEP', 'ARR', 'ACV', 'SaleableCfg']
-    market_cols = ['STD', 'C', 'Y', 'ACtype']
+    # 2. TIM: so trường thời gian
+    mask_tim = skd_data['Change code'] == 'TIM'
+    if mask_tim.any():
+        skd_tim = skd_data[mask_tim][tim_fields].astype(str)
+        merged_tim = merged_1a[tim_fields].astype(str)
+        df_tim = pd.merge(skd_tim, merged_tim, how='inner', on=tim_fields)
+        if not df_tim.empty:
+            df_tim['Change code'] = 'TIM'
+            result_list.append(df_tim)
 
-    periods_df = Periods_1A[periods_cols].copy()
-    market_df = Market_Report_1A[['OperationDate', 'OL', 'FlightNbr', 'Frequency', 'DEP', 'ARR'] + market_cols].copy()
+    # 3. CNL: so trường bay bị huỷ
+    mask_cnl = skd_data['Change code'] == 'CNL'
+    if mask_cnl.any():
+        fields = ['OL','FlightNbr','OperationDate','Frequency']
+        skd_cnl = skd_data[mask_cnl].copy()
+        merged_cnl = merged_1a[fields].copy()
+        idx = ~skd_cnl.set_index(fields).index.isin(merged_cnl.set_index(fields).index)
+        df_cnl = skd_cnl[idx][fields + ['DEP','ARR','Change code','Reason','SvType']]
+        if not df_cnl.empty:
+            result_list.append(df_cnl)
+        idx_still = ~merged_cnl.set_index(fields).index.isin(skd_cnl.set_index(fields).index)
+        still_in_market_report = merged_cnl[idx_still]
+    else:
+        still_in_market_report = None
 
-    merge_keys = ['OperationDate', 'OL', 'FlightNbr', 'Frequency', 'DEP', 'ARR']
-    Merged_1A = pd.merge(periods_df, market_df, on=merge_keys, how='inner')
+    if result_list:
+        compare_result = pd.concat(result_list, ignore_index=True)
+    else:
+        compare_result = pd.DataFrame(columns=[
+            'OL','FlightNbr','OperationDate','Frequency','DEP','ARR','ACV','SaleableCfg',
+            'C','Y','ACtype','STD','Change code','Reason','SvType'
+        ])
+    if 'still_in_market_report' not in locals():
+        still_in_market_report = None
 
-    not_in_market = pd.merge(market_df, periods_df, on=merge_keys, how='left', indicator=True)
-    NOT_in_Market_Report = not_in_market[not_in_market['_merge'] == 'left_only'].drop(columns=['_merge'])
+    return compare_result, still_in_market_report
 
-    not_in_periods = pd.merge(periods_df, market_df, on=merge_keys, how='left', indicator=True)
-    NOT_in_Periods = not_in_periods[not_in_periods['_merge'] == 'left_only'].drop(columns=['_merge'])
+def process_compare_skd_1a(db_engine):
+    """
+    So sánh SKD_Data với Merged_1A, lưu kết quả vào DB và trả về dict DataFrame để xuất Excel
+    """
+    merged, _, _ = process_merge_1a(db_engine)
+    skd_data = pd.read_sql("SKD_Data", db_engine)
+    merged_1a = pd.read_sql("Merged_1A", db_engine)
+
+    compare_result, still_in_market_report = compare_skd_and_1a(skd_data, merged_1a)
+
+    compare_result.to_sql("Compare_SKD_1A_Data", db_engine, if_exists="replace", index=False)
+    if still_in_market_report is not None and not still_in_market_report.empty:
+        still_in_market_report.to_sql("STILL_in_Market_Report", db_engine, if_exists="replace", index=False)
+    return {
+        "Compare_SKD_1A_Data": compare_result,
+        "STILL_in_Market_Report": still_in_market_report
+    }
 
 # ======== Export Excel with table selection ========
 
@@ -251,7 +303,7 @@ def export_to_excel_dialog(parent: QWidget):
 
     list_widget = QListWidget()
     list_widget.addItems(table_names)
-    list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)  # Cho phép chọn nhiều
+    list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
     layout.addWidget(list_widget)
 
     btn_export = QPushButton("Xuất Excel")
@@ -260,8 +312,6 @@ def export_to_excel_dialog(parent: QWidget):
 
     dialog.setLayout(layout)
     dialog.exec()
-
-
 
 def export_selected_table_to_excel(parent: QWidget, dialog: QDialog, list_widget: QListWidget):
     selected_items = list_widget.selectedItems()
@@ -282,7 +332,6 @@ def export_selected_table_to_excel(parent: QWidget, dialog: QDialog, list_widget
             for table_name in table_names:
                 query = f"SELECT * FROM {table_name}"
                 df = pd.read_sql(query, parent.db_engine)
-                # Nếu OperationDate là string dd-mmm-yy thì convert lại sang datetime trước khi export
                 if 'OperationDate' in df.columns:
                     df['OperationDate'] = pd.to_datetime(df['OperationDate'], format='%d-%b-%y', errors='coerce')
                 df.to_excel(writer, sheet_name=table_name[:31], index=False)
@@ -304,7 +353,6 @@ def export_table_to_excel(parent: QWidget, table_name: str):
         parent, f"Lưu file Excel cho bảng {table_name}", f"{table_name}.xlsx", "Excel Files (*.xlsx)"
     )
     if save_path:
-        # Nếu OperationDate là string dd-mmm-yy thì convert lại sang datetime
         if 'OperationDate' in df.columns:
             df['OperationDate'] = pd.to_datetime(df['OperationDate'], format='%d-%b-%y', errors='coerce')
         df.to_excel(save_path, index=False)
@@ -314,123 +362,3 @@ def export_table_to_excel(parent: QWidget, table_name: str):
             f"Đã xuất bảng {table_name} ra file Excel.",
             buttons=QMessageBox.StandardButton.Ok,
         )
-
-
-def create_merged_1a(db_engine):
-    Periods_1A = pd.read_sql("Periods_1A", db_engine)
-    Market_Report_1A = pd.read_sql("Market_Report_1A", db_engine)
-    join_cols = ["OL", "FlightNbr", "OperationDate", "Frequency", "DEP", "ARR"]
-
-    merged = pd.merge(Market_Report_1A, Periods_1A, how='inner', on=join_cols)
-
-    # Lấy export_cols từ config
-    config = Config()
-    export_cols = None
-    for cfg in config.button_configs:
-        if cfg.get("table_name") == "Market_Report_1A":
-            export_cols = cfg.get("export_cols")
-            break
-
-    if export_cols is not None:
-        merged = normalize_dataframe(merged, export_cols)
-
-    not_in_market = Periods_1A[~Periods_1A.set_index(join_cols).index.isin(
-        Market_Report_1A.set_index(join_cols).index)].reset_index(drop=True)
-    not_in_periods = Market_Report_1A[~Market_Report_1A.set_index(join_cols).index.isin(
-        Periods_1A.set_index(join_cols).index)].reset_index(drop=True)
-    return merged, not_in_market, not_in_periods
-
-def compare_skd_and_1a(skd_data, merged_1a):
-    """
-    So sánh dữ liệu SKD_Data với Merged_1A theo các trường hợp:
-    - EQT/CON: so trường cấu hình
-    - TIM: so trường thời gian
-    - CNL: so các dòng có ở SKD_Data mà không có ở Merged_1A
-    Trả về: compare_result, still_in_market_report
-    """
-    result_list = []
-    still_in_market_report = None
-
-    # 1. EQT hoặc CON: so trường cấu hình
-    mask_eqt_con = skd_data['Change code'].isin(['EQT', 'CON'])
-    if mask_eqt_con.any():
-        fields_skd = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','ACV','SaleableCfg','C(S)','Y(S)','ACtype']
-        fields_1a  = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','ACV','SaleableCfg','C','Y','ACtype']
-        skd_eqt_con = skd_data[mask_eqt_con].copy()
-        skd_eqt_con = skd_eqt_con.rename(columns={'C(S)': 'C', 'Y(S)': 'Y'})
-        merged_eqt_con = merged_1a[fields_1a].copy()
-        merged_eqt_con = merged_eqt_con.astype(str)
-        skd_eqt_con = skd_eqt_con[fields_1a].astype(str)
-        df_eqt_con = pd.merge(skd_eqt_con, merged_eqt_con, how='inner', on=fields_1a)
-        if not df_eqt_con.empty:
-            df_eqt_con['Change code'] = 'EQT/CON'
-            result_list.append(df_eqt_con)
-
-    # 2. TIM: so trường thời gian
-    mask_tim = skd_data['Change code'] == 'TIM'
-    if mask_tim.any():
-        fields = ['OL','FlightNbr','OperationDate','Frequency','DEP','ARR','STD','ACtype']
-        skd_tim = skd_data[mask_tim][fields].astype(str)
-        merged_tim = merged_1a[fields].astype(str)
-        df_tim = pd.merge(skd_tim, merged_tim, how='inner', on=fields)
-        if not df_tim.empty:
-            df_tim['Change code'] = 'TIM'
-            result_list.append(df_tim)
-
-    # 3. CNL: so trường bay bị huỷ
-    mask_cnl = skd_data['Change code'] == 'CNL'
-    if mask_cnl.any():
-        fields = ['OL','FlightNbr','OperationDate','Frequency']
-        skd_cnl = skd_data[mask_cnl].copy()
-        merged_cnl = merged_1a[fields].copy()
-        # Tìm các dòng chỉ có ở SKD mà không có ở Merged_1A
-        idx = ~skd_cnl.set_index(fields).index.isin(merged_cnl.set_index(fields).index)
-        df_cnl = skd_cnl[idx][fields + ['DEP','ARR','Change code','Reason','SvType']]
-        if not df_cnl.empty:
-            result_list.append(df_cnl)
-        # Nếu không còn chuyến nào bị huỷ, xuất các chuyến này vẫn còn trong Market_Report
-        idx_still = ~merged_cnl.set_index(fields).index.isin(skd_cnl.set_index(fields).index)
-        still_in_market_report = merged_cnl[idx_still]
-    else:
-        still_in_market_report = None
-
-    # Gộp kết quả các so sánh (nếu có)
-    if result_list:
-        compare_result = pd.concat(result_list, ignore_index=True)
-    else:
-        compare_result = pd.DataFrame()
-
-    if 'still_in_market_report' not in locals():
-        still_in_market_report = None
-
-    return compare_result, still_in_market_report
-
-
-def normalize_dataframe(df, export_cols):
-    """
-    Chuẩn hóa DataFrame:
-    - Chỉ giữ các cột theo export_cols (theo thứ tự).
-    - Nếu thiếu cột nào thì thêm cột đó với giá trị trống.
-    - Đảm bảo không có cột trùng tên.
-    """
-    # Bỏ cột trùng (giữ cột đầu tiên)
-    seen = set()
-    unique_cols = []
-    for col in df.columns:
-        if col not in seen:
-            unique_cols.append(col)
-            seen.add(col)
-    df = df[unique_cols]
-
-    # Thêm cột thiếu
-    for col in export_cols:
-        if col not in df.columns:
-            df[col] = None
-
-    # Đảm bảo thứ tự cột đúng
-    df = df[export_cols]
-
-    # Kiểm tra không còn cột trùng tên
-    assert df.columns.is_unique, "DataFrame columns not unique!"
-
-    return df
