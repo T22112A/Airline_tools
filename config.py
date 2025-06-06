@@ -1,11 +1,3 @@
-from functions import (
-    validate_and_format_for_1Aperiods,
-    validate_and_format_for_1A_market_report,
-    validate_and_format_for_AIMS,
-    validate_and_format_for_SKD,
-)
-
-
 # Sample aircraft data and Config class (you may paste your full version)
 data_tables = {
     "Aircraft": {

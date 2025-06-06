@@ -10,13 +10,45 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from sqlalchemy import inspect
 from dateutil import parser
+from functions import (
+    validate_and_format_for_1Aperiods,
+    validate_and_format_for_1A_market_report,
+    validate_and_format_for_AIMS,
+    validate_and_format_for_SKD,
+)
 
 
 
 # ======== Import chung cho nhiều loại dữ liệu ========
 
 def on_import_clicked(window, cfg):
-    """Xử lý khi nhấn nút import, gọi hàm import file chung."""
+    """Xử lý khi nhấn nút import, gán validate function rồi gọi import."""
+
+
+    # Gán validate_func tùy theo tên
+    name = cfg.get("name", "")
+    if name == "1A Periods":
+        cfg["validate_func"] = lambda df: validate_and_format_for_1Aperiods(
+            df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"]
+        )
+    elif name == "1A Market Report":
+        cfg["validate_func"] = lambda df: validate_and_format_for_1A_market_report(
+            df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"]
+        )
+    elif name == "AIMS Data":
+        aircraft_table = window.config.data_tables["Aircraft"]
+        cfg["validate_func"] = lambda df: validate_and_format_for_AIMS(
+            df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"], aircraft_table
+        )
+    elif name == "SKD Data":
+        aircraft_table = window.config.data_tables["Aircraft"]
+        cfg["validate_func"] = lambda df: validate_and_format_for_SKD(
+            df, cfg["required_cols"], cfg["col_map"], cfg["export_cols"], aircraft_table
+        )
+    else:
+        cfg["validate_func"] = lambda df: df  # fallback: không xử lý gì
+
+    # Tiếp tục như cũ
     start_row = cfg.get("start_row", window.config.default_start_row)
     num_cols = cfg.get("num_cols", window.config.default_num_cols)
     required_cols = cfg.get("required_cols", window.config.default_required_cols)
@@ -150,39 +182,7 @@ def sanitize_table_name(name):
         sanitized = f'table_{sanitized}'
     return sanitized
 
-# ======== Hàm xử lý ngày tháng ========
 
-def parse_1A_date(date_str):
-    """Parse các định dạng ngày tháng đặc biệt cho dữ liệu 1A."""
-    if isinstance(date_str, (pd.Timestamp, datetime.datetime, datetime.date)):
-        return pd.to_datetime(date_str)
-
-    date_str = str(date_str).strip()
-    if not date_str or date_str.lower() == 'nan':
-        raise ValueError("Chuỗi ngày rỗng hoặc 'nan'")
-
-    date_str = re.sub(
-        r"(\d{2})([\/\-])([A-Z]{3})([\/\-])(\d{2,4})",
-        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3).title()}{m.group(4)}{m.group(5)}",
-        date_str.upper()
-    )
-    date_str = re.sub(
-        r"(\d{2})([A-Z]{3})(\d{2,4})",
-        lambda m: f"{m.group(1)}{m.group(2).title()}{m.group(3)}",
-        date_str.upper()
-    )
-
-    for fmt in ("%d%b%y", "%d%b%Y", "%d-%b-%y", "%d-%b-%Y", "%d/%b/%y", "%d/%b/%Y",
-                "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%Y-%m-%d"):
-        try:
-            return pd.to_datetime(date_str, format=fmt, errors="raise", dayfirst=True)
-        except Exception:
-            continue
-
-    try:
-        return parser.parse(date_str, dayfirst=True, fuzzy=True)
-    except Exception:
-        raise ValueError(f"Sai định dạng ngày: '{date_str}'")
 
 # ======== Xử lý dữ liệu đặc biệt cho 1A ========
 

@@ -2,10 +2,8 @@ import re
 import pandas as pd
 import numpy as np
 import libs
-import config
 from datetime import timedelta
 from dateutil import parser
-from libs import parse_1A_date
 
 
 def _check_and_rename_cols(df, required_cols, col_map):
@@ -327,3 +325,36 @@ def process_compare_skd_1a(db_engine):
         "Compare_SKD_1A_Data": compare_result,
         "STILL_in_Market_Report": still_in_market_report
     }
+
+
+def parse_1A_date(date_str):
+    """Parse các định dạng ngày tháng đặc biệt cho dữ liệu 1A."""
+    if isinstance(date_str, (pd.Timestamp, datetime.datetime, datetime.date)):
+        return pd.to_datetime(date_str)
+
+    date_str = str(date_str).strip()
+    if not date_str or date_str.lower() == 'nan':
+        raise ValueError("Chuỗi ngày rỗng hoặc 'nan'")
+
+    date_str = re.sub(
+        r"(\d{2})([\/\-])([A-Z]{3})([\/\-])(\d{2,4})",
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3).title()}{m.group(4)}{m.group(5)}",
+        date_str.upper()
+    )
+    date_str = re.sub(
+        r"(\d{2})([A-Z]{3})(\d{2,4})",
+        lambda m: f"{m.group(1)}{m.group(2).title()}{m.group(3)}",
+        date_str.upper()
+    )
+
+    for fmt in ("%d%b%y", "%d%b%Y", "%d-%b-%y", "%d-%b-%Y", "%d/%b/%y", "%d/%b/%Y",
+                "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%Y-%m-%d"):
+        try:
+            return pd.to_datetime(date_str, format=fmt, errors="raise", dayfirst=True)
+        except Exception:
+            continue
+
+    try:
+        return parser.parse(date_str, dayfirst=True, fuzzy=True)
+    except Exception:
+        raise ValueError(f"Sai định dạng ngày: '{date_str}'")
