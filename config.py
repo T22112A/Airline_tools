@@ -2,9 +2,11 @@ from functions import (
     validate_and_format_for_1Aperiods,
     validate_and_format_for_1A_market_report,
     validate_and_format_for_AIMS,
-    validate_and_format_for_SKD
+    validate_and_format_for_SKD,
 )
 
+
+# Sample aircraft data and Config class (you may paste your full version)
 data_tables = {
     "Aircraft": {
         "columns": ["RegNr.", "ACV", "SaleableCfg", "C", "Z", "Y", "ACtype"],
@@ -133,7 +135,7 @@ class Config:
             },
             {"name": "In", "table_name": "In_Data"},
             {"name": "So sánh AIMS và 1A", "table_name": "Compare_AIMS_1A_Data"},
-            {"name": "Tải lên", "table_name": "TaiLen_Data"},
+            {"name": "So sánh SKD và 1A", "table_name": "Compare_SKD_1A_Data"},
             {"name": "Tìm kiếm", "table_name": "TimKiem_Data"},
             {"name": "Xuất dữ liệu DB", "table_name": "DB_Data"},
             {"name": "Thoát", "table_name": None}
@@ -158,3 +160,4 @@ class Config:
 
     def get_start_row(self, cfg):
         return cfg.get("start_row", self.default_start_row)
+        

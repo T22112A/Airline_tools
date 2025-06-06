@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (
 )
 from sqlalchemy import create_engine, inspect
 from config import Config
-import libs  # module chứa các hàm import/export
 import pandas as pd
-
+import libs
+import functions  # file xử lý logic
 
 class MainUI(QWidget):
     def __init__(self):
@@ -49,7 +49,9 @@ class MainUI(QWidget):
                 elif name == "Xuất dữ liệu DB":
                     button.clicked.connect(lambda: libs.export_to_excel_dialog(self))
                 elif name == "So sánh AIMS và 1A":
-                    button.clicked.connect(self.on_help_clicked)
+                    button.clicked.connect(self.on_compare_aims_1a_clicked)
+                elif name == "So sánh SKD và 1A":
+                    button.clicked.connect(self.on_compare_skd_1a_clicked)
                 else:
                     button.setEnabled(False)
 
@@ -59,45 +61,45 @@ class MainUI(QWidget):
         main_layout.addLayout(row_layout)
         self.setLayout(main_layout)
 
-    def on_help_clicked(self):
+    def on_compare_aims_1a_clicked(self):
         inspector = inspect(self.db_engine)
-        existing_tables = inspector.get_table_names()
+        existing_tables = set(inspector.get_table_names())
         required_tables = {"Market_Report_1A", "Periods_1A"}
-        missing = required_tables - set(existing_tables)
-
+        missing = required_tables - existing_tables
         if missing:
             QMessageBox.warning(self, "Thiếu dữ liệu", f"Thiếu bảng: {', '.join(missing)}. Vui lòng import đủ dữ liệu.")
             return
 
         try:
-            libs.Periods_1A = pd.read_sql("Periods_1A", self.db_engine)
-            libs.Market_Report_1A = pd.read_sql("Market_Report_1A", self.db_engine)
+            dataframes = functions.process_compare_aims_1a(self.db_engine)
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi truy vấn", f"Lỗi khi đọc dữ liệu từ database: {str(e)}")
+            QMessageBox.critical(self, "Lỗi xử lý", f"Lỗi khi xử lý so sánh AIMS-1A: {str(e)}")
+            return
+
+        self.save_excel_results(dataframes, default_name="Result_AIMS_1A.xlsx")
+
+    def on_compare_skd_1a_clicked(self):
+        inspector = inspect(self.db_engine)
+        existing_tables = set(inspector.get_table_names())
+        required_tables = {"Market_Report_1A", "Periods_1A", "SKD_Data"}
+        missing = required_tables - existing_tables
+        if missing:
+            QMessageBox.warning(self, "Thiếu dữ liệu", f"Thiếu bảng: {', '.join(missing)}. Vui lòng import đủ dữ liệu.")
             return
 
         try:
-            libs.merge_tables_for_1A()
+            dataframes = functions.process_compare_skd_1a(self.db_engine)
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi gộp dữ liệu", f"Lỗi trong hàm merge_tables_for_1A(): {str(e)}")
+            QMessageBox.critical(self, "Lỗi xử lý", f"Lỗi khi xử lý so sánh SKD-1A: {str(e)}")
             return
 
-        try:
-            libs.Merged_1A.to_sql("Merged_1A", self.db_engine, if_exists="replace", index=False)
-            libs.NOT_in_Market_Report.to_sql("NOT_in_Market_Report", self.db_engine, if_exists="replace", index=False)
-            libs.NOT_in_Periods.to_sql("NOT_in_Periods", self.db_engine, if_exists="replace", index=False)
-        except Exception as e:
-            QMessageBox.critical(self, "Lỗi ghi DB", f"Lỗi khi ghi bảng vào database: {str(e)}")
-            return
+        self.save_excel_results(dataframes, default_name="Compare_SKD_1A_Data.xlsx")
 
-        self.save_excel_results()
-
-
-    def save_excel_results(self):
+    def save_excel_results(self, dataframes, default_name):
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Lưu kết quả dưới dạng Excel",
-            "Result_AIMS_1A.xlsx",
+            default_name,
             "Excel files (*.xlsx)"
         )
         if not save_path:
@@ -108,16 +110,9 @@ class MainUI(QWidget):
 
         try:
             with pd.ExcelWriter(save_path, engine='xlsxwriter', datetime_format='dd-mmm-yy', date_format='dd-mmm-yy') as writer:
-                dataframes = {
-                    "Merged_1A": libs.Merged_1A,
-                    "NOT_in_Market_Report": libs.NOT_in_Market_Report,
-                    "NOT_in_Periods": libs.NOT_in_Periods
-                }
-
                 for sheet_name, df in dataframes.items():
                     if df is not None and not df.empty:
                         df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-
             QMessageBox.information(self, "Hoàn tất", f"Đã tạo bảng và lưu file: {save_path}")
         except Exception as e:
             QMessageBox.critical(self, "Lỗi ghi file", str(e))

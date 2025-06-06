@@ -1,15 +1,19 @@
 import re
 import pandas as pd
 import numpy as np
+import libs
+import config
 from datetime import timedelta
 from dateutil import parser
 from libs import parse_1A_date
+
 
 def _check_and_rename_cols(df, required_cols, col_map):
     for col in required_cols:
         if col not in df.columns:
             raise Exception(f"Thiếu cột: {col}")
     return df.rename(columns=col_map)
+
 
 def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
     df2 = _check_and_rename_cols(df, required_cols, col_map)
@@ -47,7 +51,7 @@ def validate_and_format_for_1Aperiods(df, required_cols, col_map, export_cols):
                     'Type': row['Type'],
                     'OL': ol,
                     'FlightNbr': flight_nbr,
-                    'OperationDate': cur_date.strftime('%d-%b-%y'),  # string for DB
+                    'OperationDate': cur_date.strftime('%d-%b-%y'),
                     'Frequency': str(cur_date.isoweekday()),
                     'I/D': row['I/D'],
                     'DEP': dep,
@@ -275,3 +279,51 @@ def validate_and_format_for_SKD(df, required_cols, col_map, export_cols, aircraf
         df_expanded["RegNr."] = df_expanded["RegNr."].fillna("")
 
     return df_expanded[final_cols].reset_index(drop=True)
+
+
+def process_merge_1a(db_engine):
+    """
+    Đọc bảng Periods_1A và Market_Report_1A, merge, lưu vào DB và trả về các DataFrame:
+    - merged (Merged_1A)
+    - not_in_market (NOT_in_Market_Report)
+    - not_in_periods (NOT_in_Periods)
+    """
+    merged, not_in_market, not_in_periods = libs.create_merged_1a(db_engine)
+    # Lưu vào DB
+    merged.to_sql("Merged_1A", db_engine, if_exists="replace", index=False)
+    not_in_market.to_sql("NOT_in_Market_Report", db_engine, if_exists="replace", index=False)
+    not_in_periods.to_sql("NOT_in_Periods", db_engine, if_exists="replace", index=False)
+    return merged, not_in_market, not_in_periods
+
+def process_compare_aims_1a(db_engine):
+    """
+    Tạo Merged_1A và các bảng liên quan, trả về dict các DataFrame để xuất Excel
+    """
+    merged, not_in_market, not_in_periods = process_merge_1a(db_engine)
+    return {
+        "Merged_1A": merged,
+        "NOT_in_Market_Report": not_in_market,
+        "NOT_in_Periods": not_in_periods
+    }
+
+def process_compare_skd_1a(db_engine):
+    """
+    Tạo Merged_1A nếu cần, so sánh với SKD_Data, trả về dict các DataFrame để xuất Excel
+    """
+    # Đảm bảo đã có Merged_1A (gọi lại merge nếu cần)
+    merged, _, _ = process_merge_1a(db_engine)
+
+    # Đọc SKD_Data và Merged_1A từ DB (đồng nhất kiểu cột)
+    skd_data = pd.read_sql("SKD_Data", db_engine)
+    merged_1a = pd.read_sql("Merged_1A", db_engine)
+
+    compare_result, still_in_market_report = libs.compare_skd_and_1a(skd_data, merged_1a)
+
+    # Lưu vào DB
+    compare_result.to_sql("Compare_SKD_1A_Data", db_engine, if_exists="replace", index=False)
+    if still_in_market_report is not None and not still_in_market_report.empty:
+        still_in_market_report.to_sql("STILL_in_Market_Report", db_engine, if_exists="replace", index=False)
+    return {
+        "Compare_SKD_1A_Data": compare_result,
+        "STILL_in_Market_Report": still_in_market_report
+    }
