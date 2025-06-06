@@ -1,11 +1,15 @@
 import os
 import re
 import pandas as pd
-import functions  # <--- Thêm dòng này
+import functions
+import logger  # <--- Thêm dòng này
 from PyQt6.QtWidgets import (
     QWidget, QFileDialog, QMessageBox, QDialog,
-    QListWidget, QPushButton, QVBoxLayout, QLabel
+    QListWidget, QPushButton, QVBoxLayout, QLabel,
+    QProgressDialog, QApplication
 )
+from PyQt6.QtWidgets import QProgressDialog
+from PyQt6.QtCore import Qt
 from sqlalchemy import inspect
 from config import Config
 
@@ -60,8 +64,18 @@ def import_file_general(self, num_cols, required_cols, start_row, import_all_she
     if not files:
         return
 
+    progress = QProgressDialog("Đang import các file...", "Hủy", 0, len(files), self)
+    progress.setWindowTitle("Đang xử lý")
+    progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+    progress.show()
+
     all_success = True
-    for file_path in files:
+    for i, file_path in enumerate(files):
+        progress.setValue(i)
+        QApplication.processEvents()
+        if progress.wasCanceled():
+            break
+
         try:
             import_file_configurable(
                 self,
@@ -77,6 +91,8 @@ def import_file_general(self, num_cols, required_cols, start_row, import_all_she
             all_success = False
             QMessageBox.critical(self, "Lỗi Import", f"File: {file_path}\n{str(e)}")
 
+    progress.setValue(len(files))
+
     if all_success:
         QMessageBox.information(self, "Hoàn tất", "Tất cả file đã được import thành công.")
 
@@ -88,11 +104,16 @@ def import_file_configurable(self, file_path, num_cols, required_cols, start_row
         sheets = xls.sheet_names
         selected_sheets = sheets if import_all_sheets else [sheets[0]]
         for sheet in selected_sheets:
+            final_table_name = table_name if table_name else sanitize_table_name(sheet)
+            logger.log_info(f'Đang import sheet {sheet} từ file {file_path} vào bảng {final_table_name}')
             df = load_file_to_dataframe_with_error_handling(self, file_path, num_cols, required_cols, start_row, sheet)
             if df is not None:
                 final_table_name = table_name if table_name else sanitize_table_name(sheet)
                 process_and_import_dataframe(self, df, final_table_name, validate_and_format_func)
     elif ext == '.csv':
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        final_table_name = table_name if table_name else sanitize_table_name(base_name)
+        logger.log_info(f'Đang import file CSV {file_path} vào bảng {final_table_name}')
         df = load_file_to_dataframe_with_error_handling(self, file_path, num_cols, required_cols, start_row)
         if df is not None:
             base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -143,6 +164,17 @@ def format_dataframe(df, required_cols, start_row):
 
 def process_and_import_dataframe(self, df, table_name, validate_and_format_func):
     """Xử lý dữ liệu theo hàm validate, ghi vào DB."""
+    
+    reply = QMessageBox.question(
+        self, "Xoá bảng?",
+        f"Bạn có muốn xoá bảng {table_name} trước khi import không?",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    )
+    if reply == QMessageBox.StandardButton.Yes:
+        with self.db_engine.connect() as conn:
+            conn.execute(f"DELETE FROM {table_name}")
+            logger.log_info(f"Đã xoá bảng {table_name} trước khi import.")
+
     processed_df = validate_and_format_func(df)
     if not processed_df.empty:
         processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
