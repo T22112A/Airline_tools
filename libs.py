@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (
     QListWidget, QPushButton, QVBoxLayout, QLabel,
     QProgressDialog, QApplication
 )
-from PyQt6.QtWidgets import QProgressDialog
 from PyQt6.QtCore import Qt
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 from config import Config
 
 def on_import_clicked(window, cfg):
@@ -166,18 +166,29 @@ def process_and_import_dataframe(self, df, table_name, validate_and_format_func)
     """Xử lý dữ liệu theo hàm validate, ghi vào DB."""
     
     reply = QMessageBox.question(
-        self, "Xoá bảng?",
-        f"Bạn có muốn xoá bảng {table_name} trước khi import không?",
+        self, "Xoá dữ liệu cũ?",  # Sửa lại câu hỏi cho chính xác
+        f"Bạn có muốn xoá toàn bộ dữ liệu cũ trong bảng '{table_name}' trước khi import không?",
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
     )
     if reply == QMessageBox.StandardButton.Yes:
-        with self.db_engine.connect() as conn:
-            conn.execute(f"DELETE FROM {table_name}")
-            logger.log_info(f"Đã xoá bảng {table_name} trước khi import.")
+        try:
+            with self.db_engine.connect() as conn:
+                # Dùng text() để thực thi câu lệnh SQL và commit để lưu thay đổi
+                conn.execute(text(f"DELETE FROM {table_name}"))
+                conn.commit()
+                logger.log_info(f"Đã xoá toàn bộ dữ liệu cũ trong bảng {table_name}.")
+        except OperationalError:
+            # Bảng chưa tồn tại, không sao cả, to_sql sẽ tạo mới.
+            logger.log_warning(f"Bảng {table_name} không tồn tại. Bảng sẽ được tạo khi import.")
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi Xoá Dữ Liệu", f"Không thể xoá dữ liệu cũ từ bảng {table_name}:\n{e}")
+            logger.log_error(f"Lỗi khi xoá dữ liệu từ bảng {table_name}: {e}")
+            return  # Dừng lại nếu không xoá được như yêu cầu
 
     processed_df = validate_and_format_func(df)
-    if not processed_df.empty:
+    if processed_df is not None and not processed_df.empty:
         processed_df.to_sql(table_name, self.db_engine, if_exists='append', index=False)
+
 
 def sanitize_table_name(name):
     """Chuẩn hóa tên bảng SQL (thay ký tự không hợp lệ, thêm tiền tố nếu bắt đầu bằng số)."""
