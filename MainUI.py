@@ -1,3 +1,4 @@
+import sys
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QApplication, QMessageBox, QFileDialog
@@ -7,6 +8,7 @@ import pandas as pd
 import libs
 import functions
 from config import Config
+import dependency_checker
 
 class MainUI(QWidget):
     def __init__(self):
@@ -17,7 +19,7 @@ class MainUI(QWidget):
         self.button_configs = self.config.button_configs
         self.button_names = [cfg["name"] for cfg in self.button_configs]
 
-        self.setWindowTitle("Ứng dụng chính")
+        self.setWindowTitle(self.config.texts["main_window_title"])
         self.setup_ui()
 
     def setup_ui(self):
@@ -67,13 +69,13 @@ class MainUI(QWidget):
         required_tables = {"Market_Report_1A", "Periods_1A"}
         missing = required_tables - existing_tables
         if missing:
-            QMessageBox.warning(self, "Thiếu dữ liệu", f"Thiếu bảng: {', '.join(missing)}. Vui lòng import đủ dữ liệu.")
+            QMessageBox.warning(self, self.config.texts["missing_data_title"], self.config.texts["missing_table_msg"].format(tables=", ".join(missing)))
             return
 
         try:
             dataframes = functions.process_compare_aims_1a(self.db_engine)
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi xử lý", f"Lỗi khi xử lý so sánh AIMS-1A: {str(e)}")
+            QMessageBox.critical(self, self.config.texts["process_error_title"], self.config.texts["process_error_msg"].format(compare_type="AIMS-1A", error=str(e)))
             return
 
         self.save_excel_results(dataframes, default_name="Compare_AIMS_1A_Data.xlsx")
@@ -84,13 +86,13 @@ class MainUI(QWidget):
         required_tables = {"Market_Report_1A", "Periods_1A", "SKD_Data"}
         missing = required_tables - existing_tables
         if missing:
-            QMessageBox.warning(self, "Thiếu dữ liệu", f"Thiếu bảng: {', '.join(missing)}. Vui lòng import đủ dữ liệu.")
+            QMessageBox.warning(self, self.config.texts["missing_data_title"], self.config.texts["missing_table_msg"].format(tables=", ".join(missing)))
             return
 
         try:
             dataframes = functions.process_compare_skd_1a(self.db_engine)
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi xử lý", f"Lỗi khi xử lý so sánh SKD-1A: {str(e)}")
+            QMessageBox.critical(self, self.config.texts["process_error_title"], self.config.texts["process_error_msg"].format(compare_type="SKD-1A", error=str(e)))
             return
 
         self.save_excel_results(dataframes, default_name="Compare_SKD_1A_Data.xlsx")
@@ -98,9 +100,9 @@ class MainUI(QWidget):
     def save_excel_results(self, dataframes, default_name):
         save_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Lưu kết quả dưới dạng Excel",
+            self.config.texts["save_excel_title"],
             default_name,
-            "Excel files (*.xlsx)"
+            self.config.texts["excel_file_filter"]
         )
         if not save_path:
             return
@@ -113,13 +115,14 @@ class MainUI(QWidget):
                 for sheet_name, df in dataframes.items():
                     if df is not None and not df.empty:
                         df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-            QMessageBox.information(self, "Hoàn tất", f"Đã tạo bảng và lưu file: {save_path}")
+            QMessageBox.information(self, self.config.texts["save_done_title"], self.config.texts["save_done_msg"].format(file=save_path))
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi ghi file", str(e))
+            QMessageBox.critical(self, self.config.texts["save_error_title"], str(e))
 
 
 if __name__ == "__main__":
-    import sys
+    if not dependency_checker.check_and_install_dependencies():
+        sys.exit(1)
     app = QApplication(sys.argv)
     window = MainUI()
     window.show()

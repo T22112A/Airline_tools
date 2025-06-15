@@ -14,6 +14,19 @@ data_tables = {
     }
 }
 
+TEXTS = {
+    "main_window_title": "Ứng dụng chính",
+    "missing_data_title": "Thiếu dữ liệu",
+    "missing_table_msg": "Thiếu bảng: {tables}. Vui lòng import đủ dữ liệu.",
+    "process_error_title": "Lỗi xử lý",
+    "process_error_msg": "Lỗi khi xử lý {compare_type}: {error}",
+    "save_excel_title": "Lưu kết quả dưới dạng Excel",
+    "excel_file_filter": "Excel files (*.xlsx)",
+    "save_done_title": "Hoàn tất",
+    "save_done_msg": "Đã tạo bảng và lưu file: {file}",
+    "save_error_title": "Lỗi ghi file",
+}
+
 class Config:
     def __init__(self):
         self.data_tables = data_tables
@@ -149,6 +162,8 @@ class Config:
                     validate_and_format_for_SKD(df, rc, cm, ec, dt)
             else:
                 cfg["validate_func"] = lambda df: df
+
+        self.texts = TEXTS
 
     def get_start_row(self, cfg):
         return cfg.get("start_row", self.default_start_row)
